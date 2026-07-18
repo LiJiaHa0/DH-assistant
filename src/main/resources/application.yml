@@ -1,0 +1,5 @@
+spring:
+  application:
+    name: DH-assistant
+server:
+  port: 8080
