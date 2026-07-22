@@ -16,6 +16,9 @@
     <description>DH-assistant</description>
     <properties>
         <java.version>21</java.version>
+        <spring.ai.version>1.1.0</spring.ai.version>
+        <spring.ai.alibaba.version>1.1.0.0</spring.ai.alibaba.version>
+        <fastjson.version>2.0.43</fastjson.version>
     </properties>
     <dependencies>
         <dependency>
@@ -52,6 +55,57 @@
             <groupId>cn.dev33</groupId>
             <artifactId>sa-token-redis-jackson</artifactId>
             <version>1.39.0</version>
+        </dependency>
+        <!-- Lombok -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!-- FastJSON2 -->
+        <dependency>
+            <groupId>com.alibaba.fastjson2</groupId>
+            <artifactId>fastjson2</artifactId>
+            <version>${fastjson.version}</version>
+        </dependency>
+        <!-- Spring AI Alibaba DashScope Starter (native DashScope integration)
+        阿里云灵积大模型的SpringAI集成starter。用来调佣通义千问等阿里云大模型，提供对话,Embedding等能力-->
+        <dependency>
+            <groupId>com.alibaba.cloud.ai</groupId>
+            <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
+            <version>${spring.ai.alibaba.version}</version>
+        </dependency>
+        <!-- Spring AI MCP Client (Tavily search integration)
+         MCP是一种让大模型调用外部工具/数据源的协议，这里用来集成Tavily搜索等外部工具，让Agent具体联网搜索能力
+         -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-mcp-client</artifactId>
+            <version>${spring.ai.version}</version>
+        </dependency>
+        <!-- Spring AI Alibaba Agent Framework
+         SpringAI的阿里云集成版本，提供了一系列的组件和工具，帮助开发者快速构建基于阿里云大模型的Agent应用
+         -->
+        <dependency>
+            <groupId>com.alibaba.cloud.ai</groupId>
+            <artifactId>spring-ai-alibaba-agent-framework</artifactId>
+            <version>${spring.ai.alibaba.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.modelcontextprotocol.sdk</groupId>
+                    <artifactId>mcp</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <!-- Spring AI OpenAI-compatible (for MCP and multimodal model support)
+        SpringAI的OpenAI兼容版本，支持MCP和多模态模型，不仅仅是调OpenAI，
+        更重要的是提供了OpenAI兼容协议的支持很多国产大模型都兼容OpenAI的API格式，
+        同时也为MCP和多模态模型调用提供底层支持。-->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
+            <version>${spring.ai.version}</version>
         </dependency>
     </dependencies>
 
