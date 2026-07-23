@@ -296,7 +296,7 @@ public class WebSearchReactAgent extends BaseAgent {
         // 记录思考过程日志
         log.info("思考过程: {}", ctx.thinkingBuffer);
         //打印推荐问题
-        log.info("推荐问题：{}",JSONObject.toJSONString(ctx.agentState.getSearchResults()));
+        log.info("推荐问题：{}",currentRecommendations);
         // 构建 metadata，将思考过程、参考来源、推荐问题序列化到JSON
         JSONObject metadata = new JSONObject();
         if (ctx.thinkingBuffer.length() > 0) {

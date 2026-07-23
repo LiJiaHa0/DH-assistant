@@ -8,8 +8,8 @@ import cn.john.dh.assistant.constant.AgentType;
 import cn.john.dh.assistant.constant.ChatMessageType;
 import cn.john.dh.assistant.constant.PromptKey;
 import cn.john.dh.assistant.prompt.service.AgentPromptService;
+import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.alibaba.fastjson2.JSON;
-import org.apache.catalina.User;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -19,6 +19,7 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.util.CollectionUtils;
@@ -60,10 +61,6 @@ public abstract class BaseAgent {
     // 是否启用推荐问题
     protected boolean enableRecommendations = true;
 
-    // 请求开始时间戳
-    protected long startTime;
-    // 首次响应时间戳
-    protected long firstResponseTime;
     // 已使用的工具名称集合
     protected Set<String> usedTools = new HashSet<>();
     // 当前对话ID
@@ -104,9 +101,8 @@ public abstract class BaseAgent {
      *
      * @param conversationId 会话ID
      * @param maxMessages    最大消息数
-     * @return 聊天消息列表
      */
-    protected List<Message> loadChatHistory(List<Message> messageList, String conversationId, int maxMessages) {
+    protected void loadChatHistory(List<Message> messageList, String conversationId, int maxMessages) {
         List<ChatMessage> messages = chatMessageService.listByConversationId(conversationId, maxMessages);
         for (ChatMessage dbMessage : messages) {
             if (dbMessage.getType() == ChatMessageType.USER) {
@@ -115,7 +111,6 @@ public abstract class BaseAgent {
                 messageList.add(new AssistantMessage(dbMessage.getContent()));
             }
         }
-        return messageList;
     }
 
 
@@ -150,7 +145,11 @@ public abstract class BaseAgent {
             BeanOutputConverter<List<String>> converter = new BeanOutputConverter<>(new ParameterizedTypeReference<>() {
             });
             // 使用chatModel构建ChatClient
-            String response = ChatClient.builder(chatModel).build()
+            String response = ChatClient.builder(chatModel)
+                    .defaultOptions(DashScopeChatOptions.builder()
+                            .model("qwen-turbo")
+                            .enableThinking(false).build())
+                    .build()
                     // 创建提示词请求
                     .prompt()
                     // 设置消息列表
@@ -239,7 +238,11 @@ public abstract class BaseAgent {
         messages.add(new UserMessage("请根据当前问题生成会话标题：" + question));
         Thread.ofVirtual().name("title" + conversation).start(() -> {
             // 使用chatModel构建ChatClient
-            String response = ChatClient.builder(chatModel).build()
+            String response = ChatClient.builder(chatModel)
+                    .defaultOptions(DashScopeChatOptions.builder()
+                            .model("qwen-turbo")
+                            .enableThinking(false).build())
+                    .build()
                     // 创建提示词请求
                     .prompt()
                     // 设置消息列表
