@@ -985,23 +985,17 @@
     }
 
     function createConversation() {
-        fetch('/chat/conversation/create', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: '新对话' })
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (data.code === 200 && data.data) {
-                conversations.unshift(data.data);
-                switchConversation(data.data);
-                renderConvList();
-            }
-        })
-        .catch(() => alert('创建会话失败'));
+        // 不再调用创建会话接口，进入空会话状态，等用户发送第一条消息时由后端创建
+        currentConvId = null;
+        clearChatMessages();
+        document.getElementById('chatTitle').textContent = '💬 新对话';
+        document.getElementById('chatSubtitle').textContent = '';
+        renderConvList();
     }
 
     function switchConversation(conv) {
+        // 临时会话点击不切换，避免加载不存在的历史记录
+        if (conv.conversationId && conv.conversationId.startsWith('temp_')) return;
         if (currentEventSource) {
             currentEventSource.close();
             currentEventSource = null;
@@ -1017,6 +1011,22 @@
         loadHistoryMessages(conv.conversationId);
     }
 
+    function loadConversationsThenSelectFirst() {
+        fetch('/chat/conversation/list')
+            .then(res => res.json())
+            .then(data => {
+                if (data.code === 200) {
+                    conversations = data.data || [];
+                    if (conversations.length > 0) {
+                        currentConvId = conversations[0].conversationId;
+                        document.getElementById('chatTitle').textContent = '💬 ' + (conversations[0].title || '未命名会话');
+                    }
+                    renderConvList();
+                }
+            })
+            .catch(() => {});
+    }
+
     function loadHistoryMessages(conversationId) {
         fetch('/chat/message/list?conversationId=' + encodeURIComponent(conversationId))
             .then(res => res.json())
@@ -1026,14 +1036,34 @@
                     if (welcome) welcome.style.display = 'none';
                     data.data.forEach(msg => {
                         const role = msg.type === 'USER' ? 'user' : 'bot';
-                        appendMessage(role, msg.content);
+                        const timeStr = formatDateTime(msg.createdAt);
+                        const wrapper = appendMessage(role, msg.content, timeStr);
+                        if (role === 'bot' && wrapper && msg.metadata) {
+                            renderHistoryMetadata(wrapper, msg.metadata);
+                        }
                     });
                 }
             })
             .catch(() => {});
     }
 
+    function isTempConversation() {
+        return currentConvId && currentConvId.startsWith('temp_');
+    }
+
     async function deleteConversation(id) {
+        const conv = conversations.find(c => c.id === id);
+        // 临时会话直接本地删除，不调用后端
+        if (conv && conv.conversationId && conv.conversationId.startsWith('temp_')) {
+            conversations = conversations.filter(c => c.id !== id);
+            if (currentConvId === conv.conversationId) {
+                currentConvId = null;
+                clearChatMessages();
+                document.getElementById('chatTitle').textContent = '💬 新对话';
+            }
+            renderConvList();
+            return;
+        }
         const ok = await showConfirm('确定删除该会话？删除后将无法恢复。', '删除会话');
         if (!ok) return;
         fetch('/chat/conversation/delete/' + id, { method: 'DELETE' })
@@ -1104,21 +1134,20 @@
         if (!text) return;
 
         if (!currentConvId) {
-            fetch('/chat/conversation/create', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title: text.substring(0, 20) })
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.code === 200 && data.data) {
-                    conversations.unshift(data.data);
-                    currentConvId = data.data.conversationId;
-                    renderConvList();
-                    doSendMessage(text);
-                }
-            })
-            .catch(() => alert('创建会话失败'));
+            // 本地创建临时会话，不调用后端接口；发送时 conversationId 传空，由后端创建正式会话
+            const tempTitle = text.substring(0, 20);
+            const tempConv = {
+                id: Date.now(),
+                conversationId: 'temp_' + Date.now(),
+                title: tempTitle,
+                status: 'ACTIVE'
+            };
+            conversations.unshift(tempConv);
+            currentConvId = tempConv.conversationId;
+            document.getElementById('chatTitle').textContent = '💬 ' + tempTitle;
+            document.getElementById('chatSubtitle').textContent = '';
+            renderConvList();
+            doSendMessage(text);
             return;
         }
 
@@ -1144,7 +1173,7 @@
         const typingEl = appendTyping();
 
         const url = '/agent/chat/stream?query=' + encodeURIComponent(text)
-                  + '&conversationId=' + encodeURIComponent(currentConvId);
+                  + '&conversationId=' + (isTempConversation() ? '' : encodeURIComponent(currentConvId));
         const es = new EventSource(url);
         currentEventSource = es;
 
@@ -1211,6 +1240,10 @@
             isSending = false;
             resetSendButton();
             document.getElementById('chatInput').focus();
+            // 临时会话：流结束后刷新会话列表，用后端创建的正式会话替换本地临时会话
+            if (isTempConversation()) {
+                loadConversationsThenSelectFirst();
+            }
         }
     }
 
@@ -1373,7 +1406,7 @@
     }
 
     // ========== 消息DOM操作 ==========
-    function appendMessage(role, text) {
+    function appendMessage(role, text, timeStr) {
         const container = document.getElementById('chatMessages');
         const row = document.createElement('div');
         row.className = 'msg-row ' + role;
@@ -1389,8 +1422,7 @@
 
         const time = document.createElement('div');
         time.className = 'msg-time';
-        const now = new Date();
-        time.textContent = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+        time.textContent = timeStr || formatNow();
 
         wrapper.appendChild(bubble);
         wrapper.appendChild(time);
@@ -1398,6 +1430,29 @@
         row.appendChild(wrapper);
         container.appendChild(row);
         container.scrollTop = container.scrollHeight;
+        return wrapper;
+    }
+
+    // 格式化当前时间为 HH:mm
+    function formatNow() {
+        const now = new Date();
+        return now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+    }
+
+    // 将后端返回的 createdAt 字符串格式化为 HH:mm（同一天）或 MM-DD HH:mm（跨天）
+    function formatDateTime(dateStr) {
+        if (!dateStr) return null;
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return null;
+        const hh = d.getHours().toString().padStart(2, '0');
+        const mm = d.getMinutes().toString().padStart(2, '0');
+        const today = new Date();
+        if (d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate()) {
+            return hh + ':' + mm;
+        }
+        const month = (d.getMonth() + 1).toString().padStart(2, '0');
+        const day = d.getDate().toString().padStart(2, '0');
+        return month + '-' + day + ' ' + hh + ':' + mm;
     }
 
     function appendBotMessageShell() {
@@ -1413,8 +1468,7 @@
 
         const time = document.createElement('div');
         time.className = 'msg-time';
-        const now = new Date();
-        time.textContent = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+        time.textContent = formatNow();
 
         wrapper.appendChild(time);
         row.appendChild(avatar);
@@ -1441,6 +1495,76 @@
         container.appendChild(row);
         container.scrollTop = container.scrollHeight;
         return row;
+    }
+
+    // ========== 历史消息 metadata 渲染 ==========
+    function renderHistoryMetadata(wrapper, metadata) {
+        let meta;
+        if (typeof metadata === 'string') {
+            try { meta = JSON.parse(metadata); } catch(e) { return; }
+        } else {
+            meta = metadata;
+        }
+
+        // 渲染思考过程
+        if (meta.thinking) {
+            const thinkEl = document.createElement('details');
+            thinkEl.open = true;
+            thinkEl.className = 'thinking-block';
+            thinkEl.style.cssText = 'margin-bottom:8px;font-size:13px;';
+            thinkEl.innerHTML = '<summary style="cursor:pointer;color:var(--text-light);user-select:none;">💭 思考过程</summary>'
+                + '<div class="thinking-content" style="margin-top:6px;color:#666;white-space:pre-wrap;line-height:1.6;"></div>';
+            thinkEl.querySelector('.thinking-content').textContent = meta.thinking;
+            wrapper.insertBefore(thinkEl, wrapper.firstChild);
+        }
+
+        // 渲染参考来源
+        if (meta.references && Array.isArray(meta.references) && meta.references.length > 0) {
+            const refDiv = document.createElement('details');
+            refDiv.open = true;
+            refDiv.style.cssText = 'margin-top:10px;font-size:13px;';
+            refDiv.innerHTML = '<summary style="cursor:pointer;color:var(--text-light);user-select:none;">📎 参考来源 (' + meta.references.length + ')</summary>';
+            const list = document.createElement('div');
+            list.style.cssText = 'margin-top:6px;';
+            meta.references.forEach((ref, i) => {
+                const item = document.createElement('div');
+                item.style.cssText = 'padding:4px 0;border-bottom:1px solid #f0f0f0;';
+                item.innerHTML = '<a href="' + escapeHtml(ref.url || '#') + '" target="_blank" rel="noopener" '
+                    + 'style="color:var(--primary);text-decoration:none;font-size:13px;">'
+                    + (i + 1) + '. ' + escapeHtml(ref.title || ref.url || '参考链接') + '</a>';
+                list.appendChild(item);
+            });
+            refDiv.appendChild(list);
+            wrapper.insertBefore(refDiv, wrapper.querySelector('.msg-time'));
+        }
+
+        // 渲染推荐问题
+        let questions = meta.recommend;
+        if (typeof questions === 'string') {
+            try { questions = JSON.parse(questions); } catch(e) { questions = null; }
+        }
+        if (Array.isArray(questions) && questions.length > 0) {
+            const recSection = document.createElement('div');
+            recSection.style.cssText = 'margin-top:20px;padding-top:14px;border-top:1px solid #f0f0f0;';
+            const recTitle = document.createElement('div');
+            recTitle.style.cssText = 'font-size:12px;color:var(--text-light);margin-bottom:10px;';
+            recTitle.textContent = '💡 推荐问题';
+            recSection.appendChild(recTitle);
+            const recDiv = document.createElement('div');
+            recDiv.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;';
+            questions.forEach(q => {
+                const btn = document.createElement('button');
+                btn.className = 'q-btn';
+                btn.style.cssText = 'padding:6px 14px;background:rgba(102,126,234,0.08);color:var(--primary);'
+                    + 'border:1px solid rgba(102,126,234,0.2);border-radius:18px;font-size:12px;cursor:pointer;'
+                    + 'transition:background 0.2s;';
+                btn.textContent = q;
+                btn.addEventListener('click', () => sendQuickQuestion(q));
+                recDiv.appendChild(btn);
+            });
+            recSection.appendChild(recDiv);
+            wrapper.insertBefore(recSection, wrapper.querySelector('.msg-time'));
+        }
     }
 
     function removeTyping(el) {

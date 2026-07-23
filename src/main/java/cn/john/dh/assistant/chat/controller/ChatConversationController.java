@@ -56,17 +56,6 @@ public class ChatConversationController {
         return R.ok(null, "更新成功");
     }
 
-    /**
-     * 创建新会话
-     */
-    @PostMapping("/create")
-    public R<ChatConversation> create(@RequestBody ChatConversation conversation) {
-        String userId = getCurrentUserId();
-        String title = conversation.getTitle() != null ? conversation.getTitle() : "新对话";
-        String conversationId = chatConversationService.createConversation(userId, title);
-        ChatConversation result = chatConversationService.getByConversationId(conversationId);
-        return R.ok(result);
-    }
 
     /**
      * 删除会话
@@ -81,7 +70,6 @@ public class ChatConversationController {
      * 从 Sa-Token 获取当前登录用户ID
      */
     private String getCurrentUserId() {
-        String loginId = StpUtil.getLoginIdAsString();
-        return loginId.startsWith("user_") ? loginId.substring(5) : loginId;
+        return StpUtil.getLoginIdAsString();
     }
 }

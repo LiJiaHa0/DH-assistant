@@ -52,8 +52,8 @@ public class AuthServiceImpl implements AuthService {
             throw new RuntimeException("账号已被冻结，请联系客服");
         }
 
-        // 5. Sa-Token 登录，使用 "user_" + id 作为 loginId
-        StpUtil.login("user_" + userInfo.getId());
+        // 5. Sa-Token 登录，直接使用用户ID作为 loginId
+        StpUtil.login(userInfo.getId());
 
         // 6. 构建返回的用户信息 VO
         LoginUserVO vo = new LoginUserVO();
@@ -120,12 +120,9 @@ public class AuthServiceImpl implements AuthService {
             return null;
         }
 
-        // 2. 从 loginId 解析用户ID（格式为 "user_" + id）
+        // 2. 从 loginId 解析用户ID（直接存储纯数字ID）
         String loginIdStr = StpUtil.getLoginIdAsString();
-        if (!loginIdStr.startsWith("user_")) {
-            return null;
-        }
-        Long userId = Long.parseLong(loginIdStr.substring(5));
+        Long userId = Long.parseLong(loginIdStr);
 
         // 3. 查询用户信息
         UserInfo userInfo = userInfoService.getById(userId);

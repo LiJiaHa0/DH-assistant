@@ -106,9 +106,9 @@ public abstract class BaseAgent {
      * @param maxMessages    最大消息数
      * @return 聊天消息列表
      */
-    protected List<Message> loadChatHistory(List<Message> messageList,String conversationId, int maxMessages) {
+    protected List<Message> loadChatHistory(List<Message> messageList, String conversationId, int maxMessages) {
         List<ChatMessage> messages = chatMessageService.listByConversationId(conversationId, maxMessages);
-        for(ChatMessage dbMessage : messages){
+        for (ChatMessage dbMessage : messages) {
             if (dbMessage.getType() == ChatMessageType.USER) {
                 messageList.add(new UserMessage(dbMessage.getContent()));
             } else if (dbMessage.getType() == ChatMessageType.ASSISTANT) {
@@ -118,21 +118,15 @@ public abstract class BaseAgent {
         return messageList;
     }
 
-    protected void saveChatConversation(String userId,String conversationId, String question) {
-        //新对话
-        if(conversationId == null || conversationId.isBlank()){
-            String conversation = chatConversationService.createConversation(conversationId, question);
-        }
-    }
 
     /**
      * 生成推荐问题
      *
      * @param currentQuestion 当前问题
-     * @param currentAnswer 当前答案
+     * @param currentAnswer   当前答案
      * @return 推荐问题JSON字符串，失败返回null
      */
-    protected String generateRecommendations(String currentQuestion, String currentAnswer, List<Message> historyMessage){
+    protected String generateRecommendations(String currentQuestion, String currentAnswer, List<Message> historyMessage) {
         if (!enableRecommendations) {
             return null;
         }
@@ -141,7 +135,7 @@ public abstract class BaseAgent {
             List<Message> messages = new ArrayList<>();
             //推荐问题的系统提示词
             messages.add(new SystemMessage(agentPromptService.getPromptContent(AgentType.REACT_AGENT, PromptKey.RECOMMEND_PROMPT)));
-            if(!CollectionUtils.isEmpty(historyMessage)){
+            if (!CollectionUtils.isEmpty(historyMessage)) {
                 historyMessage.add(new UserMessage("历史消息："));
                 messages.addAll(historyMessage);
             }
@@ -165,7 +159,7 @@ public abstract class BaseAgent {
                     .call()
                     // 获取响应内容
                     .content();
-            if(StringUtils.hasText(response)){
+            if (StringUtils.hasText(response)) {
                 // 使用转换器将模型响应解析为字符串列表
                 List<String> recommendations = converter.convert(response);
                 // 如果解析后的推荐列表非空
@@ -182,7 +176,7 @@ public abstract class BaseAgent {
             log.warn("生成推荐问题失败，响应格式无效: {}", response);
             // 返回null表示生成失败
             return null;
-        }catch (Exception e){
+        } catch (Exception e) {
             // 捕获异常并记录错误日志
             log.error("生成推荐问题异常", e);
             // 发生异常时返回null
@@ -229,6 +223,34 @@ public abstract class BaseAgent {
         }
         // 会话ID或任务管理器为空时返回null
         return null;
+    }
+
+    /**
+     * 创建会话，并且创建虚拟线程根据用户问题重写会话标题
+     *
+     * @param userId
+     * @param question
+     * @return
+     */
+    protected String createConversation(String userId, String question) {
+        String conversation = chatConversationService.createConversation(userId, question);
+        List<Message> messages = new ArrayList<>();
+        messages.add(new SystemMessage("你是一个对话标题生成助手。根据用户的第一句话，生成一个简洁的中文会话标题，要求：不超过20个字，不加引号，直接输出标题内容。"));
+        messages.add(new UserMessage("请根据当前问题生成会话标题：" + question));
+        Thread.ofVirtual().name("title" + conversation).start(() -> {
+            // 使用chatModel构建ChatClient
+            String response = ChatClient.builder(chatModel).build()
+                    // 创建提示词请求
+                    .prompt()
+                    // 设置消息列表
+                    .messages(messages)
+                    // 发起同步调用
+                    .call()
+                    // 获取响应内容
+                    .content();
+            chatConversationService.updateTitle(conversation, response);
+        });
+        return conversation;
     }
 
     /**

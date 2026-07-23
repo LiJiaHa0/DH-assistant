@@ -1,5 +1,6 @@
 package cn.john.dh.assistant.agent.websearch;
 
+import cn.dev33.satoken.stp.StpUtil;
 import cn.john.dh.assistant.agent.AgentTaskManager;
 import cn.john.dh.assistant.agent.BaseAgent;
 import cn.john.dh.assistant.chat.service.ChatConversationService;
@@ -11,7 +12,6 @@ import cn.john.dh.assistant.entity.AgentState;
 import cn.john.dh.assistant.entity.RoundMode;
 import cn.john.dh.assistant.entity.RoundState;
 import cn.john.dh.assistant.entity.SearchResult;
-import cn.john.dh.assistant.prompt.ReactAgentPrompts;
 import cn.john.dh.assistant.prompt.service.AgentPromptService;
 import cn.john.dh.assistant.utils.ThinkTagParser;
 import com.alibaba.fastjson2.JSON;
@@ -136,9 +136,15 @@ public class WebSearchReactAgent extends BaseAgent {
     }
 
 
+    /**
+     * 执行Agent，返回Flux<String>流式响应。
+     * @param conversationId 会话ID
+     * @param question       用户问题
+     * @return
+     */
     @Override
     public Flux<String> execute(String conversationId, String question) {
-        return streamInternal(conversationId, question);
+        return chat(conversationId, question);
     }
 
 
@@ -150,7 +156,59 @@ public class WebSearchReactAgent extends BaseAgent {
      * @param question       用户问题
      * @return 流式响应Flux
      */
-    public Flux<String> streamInternal(String conversationId, String question) {
+    public Flux<String> chat(String conversationId, String question) {
+        // 解析会话ID，为空时创建新会话
+        final String convId = resolveConversationId(conversationId, question);
+        // 检查是否已有任务在执行，避免同一会话并发执行多个任务
+        Flux<String> checkResult = checkRunningTask(convId); // 调用BaseAgent方法检查运行中任务
+        if (checkResult != null) { // 如果有正在运行的任务
+            return checkResult; // 直接返回错误Flux，拒绝重复执行
+        }
+        // 创建单播Sink并启用背压缓冲
+        Sinks.Many<String> sink = Sinks.many().unicast().onBackpressureBuffer();
+        // 注册任务到管理器，支持通过conversationId取消任务，调用BaseAgent方法注册任务
+        AgentTaskManager.TaskInfo taskInfo = registerTask(convId, sink);
+        // 注册失败且有会话ID时
+        if (taskInfo == null && convId != null && taskManager != null) {
+            // 返回错误流
+            return Flux.error(new IllegalStateException("该会话正在执行中，请稍后再试"));
+        }
+        // 构建初始消息列表（System Prompt + 历史记忆 + 当前问题），并保存用户问题
+        List<Message> messages = buildInitialMessages(convId, question);
+        //设置当前会话问题
+        currentQuestion = question;
+        // 创建本次流式调用的上下文状态
+        ChatStreamContext ctx = new ChatStreamContext();
+        //开始调度第一轮
+        scheduleRound(messages, sink, ctx, convId);
+        // 组装并返回响应流
+        return assembleResponseFlux(sink, ctx, convId);
+    }
+
+    /**
+     * 解析会话ID。
+     * 如果传入的会话ID为空，则创建新会话并返回新会话ID；否则原样返回。
+     *
+     * @param conversationId 会话ID
+     * @param question       用户问题
+     * @return 有效的会话ID
+     */
+    private String resolveConversationId(String conversationId, String question) {
+        if (!StringUtils.hasText(conversationId)) {
+            return createConversation(StpUtil.getLoginIdAsString(), question);
+        }
+        return conversationId;
+    }
+
+    /**
+     * 构建初始消息列表。
+     * 依次加载System Prompt、历史记忆，保存用户问题并追加到消息列表。
+     *
+     * @param conversationId 会话ID
+     * @param question       用户问题
+     * @return 线程安全的消息列表
+     */
+    private List<Message> buildInitialMessages(String conversationId, String question) {
         //创建消息列表，线程安全
         List<Message> messages = Collections.synchronizedList(new ArrayList<>());
         // ===== 加载 System Prompt（始终放在消息列表最开始）=====
@@ -158,72 +216,105 @@ public class WebSearchReactAgent extends BaseAgent {
         if (systemPrompt != null && !systemPrompt.isBlank()) { // 如果有自定义系统提示词
             messages.add(new SystemMessage(systemPrompt)); // 追加自定义系统提示词
         }
-        // 检查是否已有任务在执行，避免同一会话并发执行多个任务
-        Flux<String> checkResult = checkRunningTask(conversationId); // 调用BaseAgent方法检查运行中任务
-        if (checkResult != null) { // 如果有正在运行的任务
-            return checkResult; // 直接返回错误Flux，拒绝重复执行
-        }
-        // 创建单播Sink并启用背压缓冲
-        Sinks.Many<String> sink = Sinks.many().unicast().onBackpressureBuffer();
-        // 注册任务到管理器，支持通过conversationId取消任务
-        AgentTaskManager.TaskInfo taskInfo = registerTask(conversationId, sink); // 调用BaseAgent方法注册任务
         //加载历史记忆
         loadChatHistory(messages, conversationId, 10);
         //保存问题
         chatMessageService.saveMessage(conversationId, ChatMessageType.USER, question);
         //拼接当前会话问题
         messages.add(new UserMessage("<question>" + question + "</question>"));
-        //设置当前会话问题
-        currentQuestion = question;
-        // 迭代轮次计数器
-        AtomicLong roundCounter = new AtomicLong(0); // 使用原子长整数记录当前轮次
-        // 是否已发送最终结果的标记位
-        AtomicBoolean hasSentFinalResult = new AtomicBoolean(false); // 原子布尔，防止重复发送最终结果
-        // 收集最终答案（纯文本），用于存储到数据库的memory
-        StringBuilder finalAnswerBuffer = new StringBuilder(); // 最终答案缓冲区
-        // 收集思考过程，用于存储到数据库
-        StringBuilder thinkingBuffer = new StringBuilder(); // 思考过程缓冲区
-        // 每次流式调用创建独立的Agent状态对象
-        AgentState agentState = new AgentState();
-        //开始调度第一轮
-        scheduleRound(messages, sink, hasSentFinalResult, roundCounter, conversationId, agentState);
+        return messages;
+    }
+
+    /**
+     * 组装响应流。
+     * 为Sink的Flux绑定响应块累积、取消清理和最终落库的回调逻辑。
+     *
+     * @param sink           响应流信号发射器
+     * @param ctx            流式会话上下文
+     * @param conversationId 会话ID
+     * @return 组装完成的响应流
+     */
+    private Flux<String> assembleResponseFlux(Sinks.Many<String> sink, ChatStreamContext ctx, String conversationId) {
         return sink.asFlux()
                 // 处理每个响应块
-                .doOnNext(chunk -> {
-                    try {
-                        JSONObject json = JSON.parseObject(chunk); // 尝试将响应块解析为JSON
-                        String type = json.getString("type"); // 获取响应类型
-                        if ("text".equals(type)) { // 如果是文本类型
-                            finalAnswerBuffer.append(json.getString("content")); // 将内容追加到最终答案缓冲区
-                        } else if ("thinking".equals(type)) { // 如果是思考类型
-                            thinkingBuffer.append(json.getString("content")); // 将内容追加到思考缓冲区
-                        }
-                    } catch (Exception e) {
-                        // 非JSON格式的内容，直接追加到最终答案
-                        finalAnswerBuffer.append(chunk); // 容错处理
-                    }
-                }).doOnCancel(() -> {
-                    // 标记已发送最终结果，防止后续操作继续执行
-                    hasSentFinalResult.set(true);
-                    // 如果任务管理器存在
-                    if (taskManager != null) {
-                        // 停止并清理任务
-                        taskManager.stopTask(conversationId);
-                    }
-                })
-                .doFinally(finalStatus -> {
-                    // 记录最终答案日志
-                    log.info("最终答案: {}", finalAnswerBuffer);
-                    // 记录思考过程日志
-                    log.info("思考过程: {}", thinkingBuffer);
-                    //保存Assistant Message
-                    chatModel.getDefaultOptions().getModel();
-                    chatMessageService.saveMessage(conversationId, ChatMessageType.ASSISTANT, finalAnswerBuffer.toString());
-                    // 流结束时从任务管理器中移除任务
-                    if (taskManager != null) { // 如果任务管理器存在
-                        taskManager.stopTask(conversationId); // 停止并移除任务跟踪
-                    }
-                });
+                .doOnNext(chunk -> accumulateChunk(chunk, ctx))
+                // 流被取消时清理任务
+                .doOnCancel(() -> handleStreamCancel(conversationId, ctx))
+                // 流结束时落库并清理任务
+                .doFinally(finalStatus -> finalizeStream(conversationId, ctx));
+    }
+
+    /**
+     * 累积响应块内容。
+     * 解析响应块JSON，将文本内容和思考内容分别追加到对应缓冲区。
+     *
+     * @param chunk 响应块
+     * @param ctx   流式会话上下文
+     */
+    private void accumulateChunk(String chunk, ChatStreamContext ctx) {
+        try {
+            JSONObject json = JSON.parseObject(chunk); // 尝试将响应块解析为JSON
+            String type = json.getString("type"); // 获取响应类型
+            if ("text".equals(type)) { // 如果是文本类型
+                ctx.finalAnswerBuffer.append(json.getString("content")); // 将内容追加到最终答案缓冲区
+            } else if ("thinking".equals(type)) { // 如果是思考类型
+                ctx.thinkingBuffer.append(json.getString("content")); // 将内容追加到思考缓冲区
+            }
+        } catch (Exception e) {
+            // 非JSON格式的内容，直接追加到最终答案
+            ctx.finalAnswerBuffer.append(chunk); // 容错处理
+        }
+    }
+
+    /**
+     * 流取消时的清理逻辑。
+     * 标记已发送最终结果并停止任务。
+     *
+     * @param conversationId 会话ID
+     * @param ctx            流式会话上下文
+     */
+    private void handleStreamCancel(String conversationId, ChatStreamContext ctx) {
+        // 标记已发送最终结果，防止后续操作继续执行
+        ctx.hasSentFinalResult.set(true);
+        // 如果任务管理器存在
+        if (taskManager != null) {
+            // 停止并清理任务
+            taskManager.stopTask(conversationId);
+        }
+    }
+
+    /**
+     * 流结束时的收尾逻辑。
+     * 记录日志、保存助手消息并清理任务。
+     *
+     * @param conversationId 会话ID
+     * @param ctx            流式会话上下文
+     */
+    private void finalizeStream(String conversationId, ChatStreamContext ctx) {
+        // 记录最终答案日志
+        log.info("最终答案: {}", ctx.finalAnswerBuffer);
+        // 记录思考过程日志
+        log.info("思考过程: {}", ctx.thinkingBuffer);
+        //打印推荐问题
+        log.info("推荐问题：{}",JSONObject.toJSONString(ctx.agentState.getSearchResults()));
+        // 构建 metadata，将思考过程、参考来源、推荐问题序列化到JSON
+        JSONObject metadata = new JSONObject();
+        if (ctx.thinkingBuffer.length() > 0) {
+            metadata.put("thinking", ctx.thinkingBuffer.toString());
+        }
+        if (!ctx.agentState.getSearchResults().isEmpty()) {
+            metadata.put("references", ctx.agentState.getSearchResults());
+        }
+        if (currentRecommendations != null) {
+            metadata.put("recommend", currentRecommendations);
+        }
+        String metadataStr = metadata.isEmpty() ? null : metadata.toJSONString();
+        //保存Assistant Message（含思考过程、参考来源、推荐问题）
+        chatMessageService.saveMessage(conversationId, ChatMessageType.ASSISTANT, ctx.finalAnswerBuffer.toString(), metadataStr);
+        // 流结束时从任务管理器中移除任务
+        if (taskManager != null) { // 如果任务管理器存在
+            taskManager.stopTask(conversationId); // 停止并移除任务跟踪
+        }
     }
 
 
@@ -231,18 +322,15 @@ public class WebSearchReactAgent extends BaseAgent {
      * 调度执行一轮推理。
      * 使用ChatClient发起流式请求，处理响应块，并在轮次结束时决定下一步操作。
      *
-     * @param messages           消息列表
-     * @param sink               响应流信号发射器
-     * @param roundCounter       轮次计数器
-     * @param hasSentFinalResult 最终结果发送标记
-     * @param conversationId     会话ID
-     * @param agentState         Agent状态对象
+     * @param messages       消息列表
+     * @param sink           响应流信号发射器
+     * @param ctx            流式会话上下文
+     * @param conversationId 会话ID
      */
-    private void scheduleRound(List<Message> messages, Sinks.Many<String> sink, AtomicBoolean hasSentFinalResult,
-                               AtomicLong roundCounter, String conversationId, AgentState agentState) {
+    private void scheduleRound(List<Message> messages, Sinks.Many<String> sink, ChatStreamContext ctx, String conversationId) {
 
         // 轮次计数器+1
-        roundCounter.incrementAndGet();
+        ctx.roundCounter.incrementAndGet();
         // 创建本轮的状态跟踪对象
         RoundState state = new RoundState();
         //调用大模型处理响应数据，disposable是一个遥控器，可以关闭流式输出，用于用户停止输出，防止大模型继续输出。
@@ -251,11 +339,12 @@ public class WebSearchReactAgent extends BaseAgent {
                 .stream()
                 .chatResponse()
                 .publishOn(Schedulers.boundedElastic())
+                //处理单个响应快
                 .doOnNext(chunk -> processChunk(chunk, sink, state))
-                .doOnComplete(() -> finishRound(messages, sink, state, roundCounter, hasSentFinalResult, conversationId, agentState))
+                .doOnComplete(() -> finishRound(messages, sink, state, ctx, conversationId))
                 .doOnError(error -> {
-                    if (!hasSentFinalResult.get()) { // 如果尚未发送最终结果
-                        hasSentFinalResult.set(true); // 标记为已发送
+                    if (!ctx.hasSentFinalResult.get()) { // 如果尚未发送最终结果
+                        ctx.hasSentFinalResult.set(true); // 标记为已发送
                         sink.tryEmitError(error); // 将错误信号发射到Sink
                     }
                 })
@@ -355,23 +444,20 @@ public class WebSearchReactAgent extends BaseAgent {
      * 如果有工具调用，执行工具并将结果添加到消息列表，然后调度下一轮推理。
      * 如果已达到最大轮次限制，强制要求LLM给出最终答案。
      *
-     * @param messages           消息列表
-     * @param sink               响应流信号发射器
-     * @param state              当前轮次状态
-     * @param roundCounter       轮次计数器
-     * @param hasSentFinalResult 最终结果发送标记
-     * @param conversationId     会话ID
-     * @param agentState         Agent状态对象
+     * @param messages       消息列表
+     * @param sink           响应流信号发射器
+     * @param state          当前轮次状态
+     * @param ctx            流式会话上下文
+     * @param conversationId 会话ID
      */
     private void finishRound(List<Message> messages, Sinks.Many<String> sink, RoundState state,
-                             AtomicLong roundCounter, AtomicBoolean hasSentFinalResult,
-                             String conversationId, AgentState agentState) {
+                             ChatStreamContext ctx, String conversationId) {
         if (state.getMode() != RoundMode.TOOL_CALL) {
             String finalText = state.textBuffer.toString(); // 获取本轮输出的完整文本
             if (finalText != null && !finalText.isEmpty()) {
                 // 输出参考链接（如果有搜索结果）
-                if (!agentState.getSearchResults().isEmpty()) { // 如果Agent状态中有搜索结果
-                    String reference = JSON.toJSONString(agentState.getSearchResults()); // 将搜索结果序列化为JSON
+                if (!ctx.agentState.getSearchResults().isEmpty()) { // 如果Agent状态中有搜索结果
+                    String reference = JSON.toJSONString(ctx.agentState.getSearchResults()); // 将搜索结果序列化为JSON
                     String referenceJson = createReferenceResponse(reference); // 生成参考链接类型的SSE响应
                     sink.tryEmitNext(referenceJson); // 发送参考链接响应
                 }
@@ -387,7 +473,7 @@ public class WebSearchReactAgent extends BaseAgent {
 
                 sink.tryEmitNext(createCompleteResponse()); // 发送流式响应结束标记
                 sink.tryEmitComplete(); // 完成Sinks流，触发下游的doFinally
-                hasSentFinalResult.set(true); // 标记已发送最终结果
+                ctx.hasSentFinalResult.set(true); // 标记已发送最终结果
                 return; // 最终答案已输出，结束本轮
             }
         }
@@ -396,17 +482,16 @@ public class WebSearchReactAgent extends BaseAgent {
         messages.add(assistantMsg); // 将助手消息添加到消息历史
 
         // 检查是否已达到最大推理轮次限制
-        if (maxRounds > 0 && roundCounter.get() >= maxRounds) {
+        if (maxRounds > 0 && ctx.roundCounter.get() >= maxRounds) {
             // 轮次已用完，达到最大推理次数
-            forceFinalStream(messages, sink, hasSentFinalResult, state, conversationId, agentState); // 强制输出最终答案
+            forceFinalStream(messages, sink, ctx, state, conversationId); // 强制输出最终答案
             return; // 不再调度新的推理轮次
         }
 
         // 并行执行工具调用，完成后调度下一轮推理
-        executeToolCalls(sink, state.toolCalls, messages, hasSentFinalResult, state, agentState, () -> { // 执行工具调用，传入完成回调
-            if (!hasSentFinalResult.get()) { // 如果尚未发送最终结果
-                scheduleRound(messages, sink, hasSentFinalResult,
-                        roundCounter, conversationId, agentState);
+        executeToolCalls(sink, state.toolCalls, messages, ctx, state, () -> { // 执行工具调用，传入完成回调
+            if (!ctx.hasSentFinalResult.get()) { // 如果尚未发送最终结果
+                scheduleRound(messages, sink, ctx, conversationId);
             }
         });
 
@@ -417,15 +502,14 @@ public class WebSearchReactAgent extends BaseAgent {
      * 达到最大推理轮次时，强制输出最终答案。
      * 重建消息列表，添加系统提示词和限制提示，要求LLM不再调用工具并直接给出答案。
      *
-     * @param messages           原始消息列表（会被替换）
-     * @param sink               响应流信号发射器
-     * @param hasSentFinalResult 最终结果发送标记
-     * @param state              当前轮次状态
-     * @param conversationId     会话ID
-     * @param agentState         Agent状态对象
+     * @param messages       原始消息列表（会被替换）
+     * @param sink           响应流信号发射器
+     * @param ctx            流式会话上下文
+     * @param state          当前轮次状态
+     * @param conversationId 会话ID
      */
-    private void forceFinalStream(List<Message> messages, Sinks.Many<String> sink, AtomicBoolean hasSentFinalResult,
-                                  RoundState state, String conversationId, AgentState agentState) {
+    private void forceFinalStream(List<Message> messages, Sinks.Many<String> sink, ChatStreamContext ctx,
+                                  RoundState state, String conversationId) {
         List<Message> newMessages = new ArrayList<>();
         // 添加系统提示词
         newMessages.add(new SystemMessage(agentPromptService.getPromptContent(AgentType.WEB_SEARCH, PromptKey.RECOMMEND_PROMPT)));
@@ -462,7 +546,7 @@ public class WebSearchReactAgent extends BaseAgent {
                     }
                     String text = chunk.getResult().getOutput().getText();
                     // 文本非空且未发送最终结果
-                    if (text != null && !hasSentFinalResult.get()) {
+                    if (text != null && !ctx.hasSentFinalResult.get()) {
                         // 解析think标签
                         ThinkTagParser.ParseResult parseResult = ThinkTagParser.parse(text, state.inThink);
                         // 更新思考状态
@@ -483,8 +567,8 @@ public class WebSearchReactAgent extends BaseAgent {
                 }).doOnComplete(() -> {
                     String finalText = finalTextBuffer.toString(); // 获取最终文本
                     // 输出参考链接（如果有搜索结果）
-                    if (!agentState.getSearchResults().isEmpty()) { // 如果有搜索结果
-                        String reference = JSON.toJSONString(agentState.getSearchResults()); // 序列化搜索结果
+                    if (!ctx.agentState.getSearchResults().isEmpty()) { // 如果有搜索结果
+                        String reference = JSON.toJSONString(ctx.agentState.getSearchResults()); // 序列化搜索结果
                         String referenceJson = createReferenceResponse(reference); // 生成参考链接响应
                         sink.tryEmitNext(referenceJson); // 发送参考链接
                     }
@@ -503,7 +587,7 @@ public class WebSearchReactAgent extends BaseAgent {
                         }
                     }
                     // 标记已发送最终结果
-                    hasSentFinalResult.set(true);
+                    ctx.hasSentFinalResult.set(true);
                     sink.tryEmitNext(createCompleteResponse()); // 发送流式响应结束标记
                     // 完成Sinks流
                     sink.tryEmitComplete();
@@ -516,17 +600,16 @@ public class WebSearchReactAgent extends BaseAgent {
      * 使用boundedElastic调度器并行执行多个工具调用，通过AtomicInteger和ConcurrentHashMap
      * 保证所有工具调用完成后按原始顺序组装结果。
      *
-     * @param sink               响应流信号发射器
-     * @param toolCalls          工具调用列表
-     * @param messages           消息列表
-     * @param hasSentFinalResult 最终结果发送标记
-     * @param state              当前轮次状态
-     * @param agentState         Agent状态对象
-     * @param onComplete         所有工具调用完成后的回调
+     * @param sink       响应流信号发射器
+     * @param toolCalls  工具调用列表
+     * @param messages   消息列表
+     * @param ctx        流式会话上下文
+     * @param state      当前轮次状态
+     * @param onComplete 所有工具调用完成后的回调
      */
     private void executeToolCalls(Sinks.Many<String> sink, List<AssistantMessage.ToolCall> toolCalls,
-                                  List<Message> messages, AtomicBoolean hasSentFinalResult,
-                                  RoundState state, AgentState agentState, Runnable onComplete) {
+                                  List<Message> messages, ChatStreamContext ctx,
+                                  RoundState state, Runnable onComplete) {
         // 原子计数器，跟踪已完成的工具调用数量
         AtomicInteger completedCount = new AtomicInteger(0);
         // 工具调用总数
@@ -537,7 +620,7 @@ public class WebSearchReactAgent extends BaseAgent {
         for (AssistantMessage.ToolCall toolCall : toolCalls) {
             //提交工具去弹性线程池异步执行
             Schedulers.boundedElastic().schedule(() -> {
-                if (hasSentFinalResult.get()) {
+                if (ctx.hasSentFinalResult.get()) {
                     // 已发送最终结果，完成工具调用
                     completeToolCall(completedCount, totalToolCalls, responseMap, toolCalls, messages, onComplete);
                     return;
@@ -572,7 +655,7 @@ public class WebSearchReactAgent extends BaseAgent {
                     recordUsedTool(toolName); // 调用BaseAgent方法记录工具使用
                     // 如果是tavily搜索工具，解析搜索结果用于生成参考链接
                     if (toolName.contains("tavily")) { // 工具名称包含"tavily"
-                        parseSearchResult(resultStr, agentState); // 解析搜索结果并添加到Agent状态
+                        parseSearchResult(resultStr, ctx.agentState); // 解析搜索结果并添加到Agent状态
                     }
                     // 将工具执行结果放入responseMap
                     responseMap.put(toolCall.id(), new ToolResponseMessage.ToolResponse( // 存储工具执行结果
@@ -672,7 +755,7 @@ public class WebSearchReactAgent extends BaseAgent {
                 String content = getSafe(item, "content"); // 安全获取content字段
 
                 if (url != null && !url.isBlank()) { // 只添加有URL的结果
-                    state.addSearchResult(new SearchResult(title, content,url)); // 创建SearchResult并添加到Agent状态
+                    state.addSearchResult(new SearchResult(title, content, url)); // 创建SearchResult并添加到Agent状态
                 }
             }
 
@@ -691,6 +774,24 @@ public class WebSearchReactAgent extends BaseAgent {
     private String getSafe(JsonNode node, String field) { // 安全获取JSON节点的字符串字段值
         JsonNode v = node.get(field); // 获取指定字段的节点
         return v == null || v.isNull() ? null : v.asText(); // 节点不存在或为null时返回null，否则返回文本值
+    }
+
+    /**
+     * 流式会话上下文。
+     * 封装单次流式调用过程中需要跨方法传递的状态对象，
+     * 避免在方法签名中层层传递多个独立变量。
+     */
+    private static class ChatStreamContext {
+        // 迭代轮次计数器
+        final AtomicLong roundCounter = new AtomicLong(0);
+        // 是否已发送最终结果的标记位
+        final AtomicBoolean hasSentFinalResult = new AtomicBoolean(false);
+        // 收集最终答案（纯文本），用于存储到数据库的memory
+        final StringBuilder finalAnswerBuffer = new StringBuilder();
+        // 收集思考过程，用于存储到数据库
+        final StringBuilder thinkingBuffer = new StringBuilder();
+        // 每次流式调用创建独立的Agent状态对象
+        final AgentState agentState = new AgentState();
     }
 
     /**

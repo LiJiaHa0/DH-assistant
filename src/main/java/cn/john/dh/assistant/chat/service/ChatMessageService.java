@@ -41,6 +41,17 @@ public interface ChatMessageService extends IService<ChatMessage> {
     String saveMessage(String conversationId, ChatMessageType type, String content);
 
     /**
+     * 保存一条对话消息（含元数据）
+     *
+     * @param conversationId 所属会话ID
+     * @param type           角色：USER/ASSISTANT
+     * @param content        消息内容
+     * @param metadata       扩展元数据JSON字符串（可存储思考过程、推荐问题、参考来源等）
+     * @return 消息唯一标识 messageId
+     */
+    String saveMessage(String conversationId, ChatMessageType type, String content, String metadata);
+
+    /**
      * 更新消息内容（如改写内容、补充 token 统计等）
      *
      * @param messageId       消息唯一标识

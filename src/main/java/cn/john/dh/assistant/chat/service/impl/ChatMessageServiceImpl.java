@@ -27,7 +27,7 @@ public class ChatMessageServiceImpl extends ServiceImpl<ChatMessageMapper, ChatM
         return list(new LambdaQueryWrapper<ChatMessage>()
                 .eq(ChatMessage::getConversationId, conversationId)
                 .last("limit " + maxMessages)
-                .orderByAsc(ChatMessage::getCreatedAt));
+                .orderByAsc(ChatMessage::getId));
     }
 
     @Override
@@ -38,13 +38,18 @@ public class ChatMessageServiceImpl extends ServiceImpl<ChatMessageMapper, ChatM
 
     @Override
     public String saveMessage(String conversationId, ChatMessageType type, String content) {
-        String messageId = UUID.randomUUID().toString().replace("-", "");
+        return saveMessage(conversationId, type, content, null);
+    }
 
+    @Override
+    public String saveMessage(String conversationId, ChatMessageType type, String content, String metadata) {
+        String messageId = UUID.randomUUID().toString().replace("-", "");
         ChatMessage message = new ChatMessage();
         message.setMessageId(messageId);
         message.setConversationId(conversationId);
         message.setType(type);
         message.setContent(content);
+        message.setMetadata(metadata);
         message.setCreatedAt(LocalDateTime.now());
         message.setUpdatedAt(LocalDateTime.now());
 
