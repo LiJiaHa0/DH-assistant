@@ -11,7 +11,11 @@ public enum AgentType {
     REACT_AGENT("react_agent", "ReAct推理Agent"),
     WEB_SEARCH("web_search", "联网搜索Agent"),
     FILE("file", "文件分析Agent"),
-    SKILLS("skills", "全能技能Agent");
+    SKILLS("skills", "全能技能Agent"),
+    PLAN_EXECUTE("plan_execute", "深度研究Agent"),
+
+    ;
+
 
     private final String code;
     private final String description;

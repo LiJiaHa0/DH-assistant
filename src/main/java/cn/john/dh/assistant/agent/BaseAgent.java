@@ -19,7 +19,6 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.util.CollectionUtils;
@@ -27,7 +26,12 @@ import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * @Author John
@@ -63,8 +67,6 @@ public abstract class BaseAgent {
 
     // 已使用的工具名称集合
     protected Set<String> usedTools = new HashSet<>();
-    // 当前对话ID
-    protected String currentConversationId;
     // 当前用户问题
     protected String currentQuestion;
     // 当前推荐问题
@@ -145,11 +147,7 @@ public abstract class BaseAgent {
             BeanOutputConverter<List<String>> converter = new BeanOutputConverter<>(new ParameterizedTypeReference<>() {
             });
             // 使用chatModel构建ChatClient
-            String response = ChatClient.builder(chatModel)
-                    .defaultOptions(DashScopeChatOptions.builder()
-                            .model("qwen-turbo")
-                            .enableThinking(false).build())
-                    .build()
+            String response = ChatClient.builder(chatModel).defaultOptions(DashScopeChatOptions.builder().model("qwen-turbo").enableThinking(false).build()).build()
                     // 创建提示词请求
                     .prompt()
                     // 设置消息列表
@@ -201,6 +199,16 @@ public abstract class BaseAgent {
     }
 
     /**
+     * 清除已使用的工具记录集合
+     */
+    protected void clearUsedTools() {
+        // 工具集合非空时清空
+        if (usedTools != null) {
+            usedTools.clear();
+        }
+    }
+
+    /**
      * 注册任务到任务管理器
      * 用于任务追踪和取消控制
      *
@@ -238,11 +246,7 @@ public abstract class BaseAgent {
         messages.add(new UserMessage("请根据当前问题生成会话标题：" + question));
         Thread.ofVirtual().name("title" + conversation).start(() -> {
             // 使用chatModel构建ChatClient
-            String response = ChatClient.builder(chatModel)
-                    .defaultOptions(DashScopeChatOptions.builder()
-                            .model("qwen-turbo")
-                            .enableThinking(false).build())
-                    .build()
+            String response = ChatClient.builder(chatModel).defaultOptions(DashScopeChatOptions.builder().model("qwen-turbo").enableThinking(false).build()).build()
                     // 创建提示词请求
                     .prompt()
                     // 设置消息列表
@@ -322,6 +326,77 @@ public abstract class BaseAgent {
     protected String createCompleteResponse() {
         // 调用AgentResponse生成结束标记JSON
         return AgentResponse.complete();
+    }
+
+    /**
+     * 发送响应（带思考缓冲区参数版本）
+     * 内容过长时自动拆分为 3~7 字符分块，模拟流式逐字推送
+     *
+     * @param sink     响应流信号发射器
+     * @param finished 完成标记
+     * @param content  响应内容
+     * @param type     响应类型（text/thinking）
+     */
+    protected void emit(Sinks.Many<String> sink,
+                      AtomicBoolean finished,
+                      String content,
+                      String type) {
+        // 如果流程已完成，不再发送
+        if (finished.get() || content == null || content.isEmpty()) {
+            return;
+        }
+        // 短内容直接整块发送
+        if (content.length() <= 7) {
+            doSend(sink, content, type);
+            return;
+        }
+        // 长内容拆分为 3~7 字符分块逐段发送
+        int offset = 0;
+        while (offset < content.length()) {
+            // 流程已被中断则提前退出
+            if (finished.get()) {
+                return;
+            }
+            // 随机决定本块长度（3~7字符，剩余不足时取剩余部分）
+            int chunkLen = Math.min(ThreadLocalRandom.current().nextInt(3, 8), content.length() - offset);
+            String chunk = content.substring(offset, offset + chunkLen);
+            doSend(sink, chunk, type);
+            offset += chunkLen;
+        }
+    }
+
+    /**
+     * 发送错误到流
+     * 使用CAS确保只发送一次错误
+     *
+     * @param sink     响应流信号发射器
+     * @param finished 完成标记
+     * @param e        异常对象
+     */
+    protected void error(Sinks.Many<String> sink,
+                       AtomicBoolean finished,
+                       Throwable e) {
+
+        // CAS操作：仅当finished为false时设为true
+        if (finished.compareAndSet(false, true)) {
+            // 发送错误信号
+            sink.tryEmitError(e);
+        }
+    }
+
+    /**
+     * 实际发送单个分块
+     *
+     * @param sink    响应流信号发射器
+     * @param chunk   本次发送的文本片段
+     * @param type    响应类型（text/thinking）
+     */
+    private void doSend(Sinks.Many<String> sink, String chunk, String type) {
+        if ("thinking".equals(type)) {
+            sink.tryEmitNext(createThinkingResponse(chunk));
+        } else {
+            sink.tryEmitNext(createTextResponse(chunk));
+        }
     }
 
 }

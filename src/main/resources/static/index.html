@@ -11,17 +11,17 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
         :root {
-            --primary: #667eea;
-            --primary-dark: #764ba2;
-            --bg: #f5f7fb;
+            --primary: #4e6ef2;
+            --primary-dark: #3451b2;
+            --bg: #f7f8fa;
             --card: #ffffff;
-            --text: #333333;
-            --text-light: #888888;
-            --border: #e8e8e8;
-            --msg-user: #667eea;
-            --msg-bot: #f0f2f5;
-            --sidebar-w: 220px;
-            --conv-w: 240px;
+            --text: #1a1a1a;
+            --text-light: #8c8c8c;
+            --border: #ebedf0;
+            --msg-user: #4e6ef2;
+            --msg-bot: #f2f3f5;
+            --sidebar-w: auto;
+            --conv-w: 230px;
         }
 
         body {
@@ -34,17 +34,16 @@
             overflow: hidden;
         }
 
-        /* ========== 顶部导航 ========== */
+        /* ========== 顶部导航栏 ========== */
         .navbar {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-            color: #fff;
+            background: #ffffff;
+            color: var(--text);
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            padding: 0 32px;
+            padding: 0 24px;
             height: 56px;
             flex-shrink: 0;
-            box-shadow: 0 2px 12px rgba(102, 126, 234, 0.25);
+            border-bottom: 1px solid var(--border);
             position: relative;
             z-index: 100;
         }
@@ -52,46 +51,51 @@
         .navbar .brand {
             display: flex;
             align-items: center;
-            gap: 12px;
-            font-size: 18px;
+            gap: 10px;
+            font-size: 16px;
             font-weight: 700;
+            color: var(--text);
+            margin-right: 36px;
         }
 
         .navbar .brand .logo-icon {
             width: 32px;
             height: 32px;
-            background: rgba(255,255,255,0.2);
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
             border-radius: 8px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 14px;
+            font-size: 12px;
+            color: #fff;
+            font-weight: 700;
         }
 
         .navbar .user-area {
             display: flex;
             align-items: center;
             gap: 16px;
+            margin-left: auto;
         }
 
         .navbar .user-area .user-name {
             font-size: 14px;
-            opacity: 0.9;
+            color: var(--text-light);
         }
 
         .navbar .user-area .btn-logout {
             padding: 6px 16px;
-            background: rgba(255,255,255,0.18);
-            border: 1px solid rgba(255,255,255,0.3);
+            background: #f5f5f5;
+            border: 1px solid var(--border);
             border-radius: 8px;
-            color: #fff;
+            color: var(--text-light);
             font-size: 13px;
             cursor: pointer;
             transition: background 0.3s;
         }
 
         .navbar .user-area .btn-logout:hover {
-            background: rgba(255,255,255,0.3);
+            background: #ebebeb;
         }
 
         /* ========== 主体区域 ========== */
@@ -101,60 +105,52 @@
             overflow: hidden;
         }
 
-        /* ========== 导航侧边栏 ========== */
-        .sidebar {
-            width: var(--sidebar-w);
-            background: var(--card);
-            border-right: 1px solid var(--border);
+        /* ========== 导航标签栏（顶部栏内） ========== */
+        .nav-tabs {
             display: flex;
-            flex-direction: column;
-            flex-shrink: 0;
-            padding: 20px 0;
+            flex-direction: row;
+            align-items: center;
+            gap: 4px;
+            flex: 1;
+            justify-content: center;
         }
 
-        .sidebar .nav-item {
+        .nav-tabs .nav-item {
             display: flex;
             align-items: center;
-            gap: 12px;
-            padding: 12px 24px;
-            font-size: 14px;
+            gap: 6px;
+            padding: 8px 20px;
+            font-size: 15px;
             color: var(--text-light);
             cursor: pointer;
+            border-radius: 20px;
             transition: background 0.2s, color 0.2s;
-            border-left: 3px solid transparent;
             user-select: none;
+            white-space: nowrap;
         }
 
-        .sidebar .nav-item:hover {
-            background: #f5f7fb;
-            color: var(--primary);
+        .nav-tabs .nav-item:hover {
+            background: #f2f3f5;
+            color: var(--text);
         }
 
-        .sidebar .nav-item.active {
-            background: rgba(102, 126, 234, 0.08);
+        .nav-tabs .nav-item.active {
+            background: rgba(78, 110, 242, 0.08);
             color: var(--primary);
             font-weight: 600;
-            border-left-color: var(--primary);
         }
 
-        .sidebar .nav-item .icon {
-            font-size: 16px;
+        .nav-tabs .nav-item .icon {
+            font-size: 15px;
             width: 20px;
             text-align: center;
-        }
-
-        .sidebar .sidebar-footer {
-            margin-top: auto;
-            padding: 16px 24px;
-            font-size: 12px;
-            color: #bbb;
-            line-height: 1.8;
         }
 
         /* ========== 内容区 ========== */
         .content-area {
             flex: 1;
             display: flex;
+            flex-direction: column;
             overflow: hidden;
         }
 
@@ -261,25 +257,24 @@
         .conv-sidebar {
             width: var(--conv-w);
             background: var(--card);
-            border-right: 1px solid var(--border);
             display: flex;
             flex-direction: column;
             flex-shrink: 0;
+            padding-top: 8px;
         }
 
         .conv-header {
-            padding: 16px;
-            border-bottom: 1px solid var(--border);
+            padding: 8px 12px 12px;
         }
 
         .btn-new-conv {
             width: 100%;
             padding: 10px;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+            background: var(--primary);
             color: #fff;
             border: none;
             border-radius: 10px;
-            font-size: 13px;
+            font-size: 15px;
             font-weight: 600;
             cursor: pointer;
             display: flex;
@@ -294,7 +289,26 @@
         .conv-list {
             flex: 1;
             overflow-y: auto;
-            padding: 8px;
+            padding: 4px 8px;
+        }
+
+        .conv-list-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 12px 8px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-light);
+        }
+
+        .conv-list-header .badge {
+            background: #f0f0f0;
+            color: var(--text-light);
+            padding: 1px 7px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
         }
 
         .conv-item {
@@ -307,16 +321,15 @@
             gap: 8px;
             margin-bottom: 2px;
             transition: background 0.15s;
-            font-size: 13px;
+            font-size: 14px;
             color: #555;
         }
 
         .conv-item:hover { background: #f0f2f8; }
 
         .conv-item.active {
-            background: rgba(102, 126, 234, 0.1);
+            background: rgba(78, 110, 242, 0.08);
             color: var(--primary);
-            font-weight: 600;
         }
 
         .conv-item .conv-title {
@@ -344,7 +357,14 @@
             text-align: center;
             padding: 40px 16px;
             color: #bbb;
-            font-size: 13px;
+            font-size: 14px;
+        }
+
+        .conv-footer {
+            text-align: center;
+            padding: 12px;
+            font-size: 12px;
+            color: #ccc;
         }
 
         /* -- 聊天主区域 -- */
@@ -356,18 +376,19 @@
         }
 
         .chat-header {
-            padding: 14px 28px;
+            padding: 16px 28px;
             border-bottom: 1px solid var(--border);
             background: var(--card);
         }
 
         .chat-header h3 {
-            font-size: 15px;
+            font-size: 17px;
             color: var(--text);
+            font-weight: 600;
         }
 
         .chat-header .chat-subtitle {
-            font-size: 12px;
+            font-size: 13px;
             color: var(--text-light);
             margin-top: 2px;
         }
@@ -412,7 +433,7 @@
         .msg-bubble {
             padding: 10px 16px;
             border-radius: 12px;
-            font-size: 14px;
+            font-size: 15px;
             line-height: 1.7;
             word-break: break-word;
         }
@@ -430,7 +451,7 @@
         }
 
         .msg-time {
-            font-size: 11px;
+            font-size: 12px;
             color: #bbb;
             margin-top: 4px;
         }
@@ -439,46 +460,61 @@
 
         .chat-welcome {
             text-align: center;
-            padding: 60px 28px;
+            padding: 60px 28px 32px;
             color: var(--text-light);
         }
 
-        .chat-welcome .welcome-icon { font-size: 44px; margin-bottom: 14px; }
+        .chat-welcome .welcome-icon { font-size: 48px; margin-bottom: 16px; }
 
         .chat-welcome h4 {
-            font-size: 17px;
+            font-size: 24px;
             color: var(--text);
-            margin-bottom: 8px;
+            margin-bottom: 10px;
+            font-weight: 700;
         }
 
         .chat-welcome p {
-            font-size: 14px;
+            font-size: 15px;
             max-width: 380px;
             margin: 0 auto;
             line-height: 1.7;
+            color: var(--text-light);
         }
 
         .quick-questions {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            gap: 8px;
-            margin-top: 20px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 28px;
+            max-width: 560px;
+            margin-left: auto;
+            margin-right: auto;
         }
 
         .quick-questions .q-btn {
-            padding: 7px 16px;
-            background: rgba(102, 126, 234, 0.08);
-            color: var(--primary);
-            border: 1px solid rgba(102, 126, 234, 0.2);
-            border-radius: 18px;
-            font-size: 13px;
+            padding: 14px 18px;
+            background: #fff;
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            font-size: 14px;
             cursor: pointer;
-            transition: background 0.2s;
+            transition: all 0.2s;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+            text-align: left;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-left: 3px solid var(--primary);
         }
 
-        .quick-questions .q-btn:hover { background: rgba(102, 126, 234, 0.15); }
-        .q-btn:hover { background: rgba(102, 126, 234, 0.15); }
+        .quick-questions .q-btn:hover {
+            background: #f8f9fb;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+            transform: translateY(-1px);
+        }
+
+        .q-btn:hover { background: #f8f9fb; }
 
         .chat-input-area {
             padding: 12px 24px;
@@ -503,7 +539,7 @@
             outline: none;
             background: transparent;
             padding: 0;
-            font-size: 14px;
+            font-size: 15px;
             line-height: 1.5;
             color: var(--text);
             resize: none;
@@ -534,7 +570,7 @@
             border-radius: 12px;
             background: transparent;
             color: var(--primary);
-            font-size: 12px;
+            font-size: 13px;
             cursor: pointer;
             transition: all 0.2s;
         }
@@ -576,7 +612,7 @@
             height: 32px;
             border-radius: 50%;
             border: none;
-            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            background: var(--primary);
             color: #fff;
             cursor: pointer;
             display: flex;
@@ -708,14 +744,22 @@
             transform: translateY(-1px);
         }
 
+        .chat-input-footer {
+            text-align: center;
+            font-size: 12px;
+            color: #bbb;
+            padding: 8px 0 4px;
+        }
+
         /* ========== 响应式 ========== */
         @media (max-width: 768px) {
-            .sidebar { display: none; }
+            .nav-tabs { display: none; }
             .conv-sidebar { display: none; }
             .intro-page { padding: 24px 20px; }
             .chat-messages { padding: 16px; }
             .chat-input-area { padding: 12px 16px; }
             .msg-row { max-width: 88%; }
+            .quick-questions { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -725,7 +769,17 @@
 <nav class="navbar">
     <div class="brand">
         <div class="logo-icon">DH</div>
-        <span>DH Assistant</span>
+        <span>DH智能助手</span>
+    </div>
+    <div class="nav-tabs">
+        <div class="nav-item active" data-page="chat">
+            <span class="icon">💬</span>
+            <span>聊天</span>
+        </div>
+        <div class="nav-item" data-page="intro">
+            <span class="icon">📋</span>
+            <span>项目介绍</span>
+        </div>
     </div>
     <div class="user-area">
         <span class="user-name" id="userNickname">加载中...</span>
@@ -736,27 +790,11 @@
 <!-- 主体布局 -->
 <div class="main-layout">
 
-    <!-- 导航侧边栏 -->
-    <aside class="sidebar">
-        <div class="nav-item active" data-page="intro">
-            <span class="icon">📋</span>
-            <span>项目介绍</span>
-        </div>
-        <div class="nav-item" data-page="chat">
-            <span class="icon">💬</span>
-            <span>智能助手</span>
-        </div>
-        <div class="sidebar-footer">
-            DH Assistant v1.0<br>
-            Powered by Spring Boot
-        </div>
-    </aside>
-
     <!-- 内容区 -->
     <main class="content-area">
 
         <!-- 项目介绍页 -->
-        <section class="page-section intro-page active" id="page-intro">
+        <section class="page-section intro-page" id="page-intro">
             <h2>欢迎使用 DH Assistant</h2>
             <p class="intro-subtitle">一款基于 AI 的智能文档管理与问答助手</p>
 
@@ -791,16 +829,20 @@
 
             <div class="intro-card">
                 <h3>🚀 快速开始</h3>
-                <p>点击左侧导航栏中的 <strong>"智能助手"</strong> 即可开始与 AI 对话。</p>
+                <p>点击顶部导航栏中的 <strong>"聊天"</strong> 即可开始与 AI 对话。</p>
             </div>
         </section>
 
         <!-- 智能助手聊天页 -->
-        <section class="page-section chat-page" id="page-chat">
+        <section class="page-section chat-page active" id="page-chat">
             <!-- 会话列表 -->
             <div class="conv-sidebar">
                 <div class="conv-header">
-                    <button class="btn-new-conv" onclick="createConversation()">✚ 新建对话</button>
+                    <button class="btn-new-conv" onclick="createConversation()">✚ 新对话</button>
+                </div>
+                <div class="conv-list-header">
+                    <span>💬 历史会话</span>
+                    <span class="badge" id="convBadge" style="display:none;">0</span>
                 </div>
                 <div class="conv-list" id="convList">
                     <div class="conv-empty" id="convEmpty">暂无会话，点击上方按钮创建</div>
@@ -816,26 +858,27 @@
 
                 <div class="chat-messages" id="chatMessages">
                     <div class="chat-welcome" id="chatWelcome">
-                        <div class="welcome-icon">🤖</div>
-                        <h4>你好！我是 DH 智能助手</h4>
-                        <p>我可以帮你解答各类问题，试试下面的问题开始吧：</p>
+                        <div class="welcome-icon">👋</div>
+                        <h4>你好呀 有什么可以帮你的？</h4>
+                        <p>试试下面的问题开始吧</p>
                         <div class="quick-questions">
-                            <button class="q-btn" onclick="sendQuickQuestion('这个系统有哪些主要功能？')">这个系统有哪些主要功能？</button>
-                            <button class="q-btn" onclick="sendQuickQuestion('如何管理文档知识库？')">如何管理文档知识库？</button>
-                            <button class="q-btn" onclick="sendQuickQuestion('帮我介绍一下技术架构')">帮我介绍一下技术架构</button>
+                            <button class="q-btn" onclick="sendQuickQuestion('这个系统有哪些主要功能？')">💬 这个系统有哪些主要功能？</button>
+                            <button class="q-btn" onclick="sendQuickQuestion('如何管理文档知识库？')">💬 如何管理文档知识库？</button>
+                            <button class="q-btn" onclick="sendQuickQuestion('帮我介绍一下技术架构')">💬 帮我介绍一下技术架构</button>
+                            <button class="q-btn" onclick="sendQuickQuestion('有哪些常用的提示词技巧？')">💬 有哪些常用的提示词技巧？</button>
                         </div>
                     </div>
                 </div>
 
                 <div class="chat-input-area">
                     <div class="input-card">
-                        <textarea id="chatInput" rows="1" placeholder="输入你的问题，按 Enter 发送..."
+                        <textarea id="chatInput" rows="1" placeholder="输入你的问题（数据分析、联网搜索、文件分析... 可拖拽文件到此处 / Shift+Enter 换行）"
                             onkeydown="handleInputKeydown(event)"></textarea>
                         <div class="input-toolbar">
                             <div class="toolbar-left">
                                 <button class="tool-toggle active" id="searchToggle" title="智能搜索">
                                     <span>🌐</span>
-                                    <span>智能搜索</span>
+                                    <span>联网</span>
                                 </button>
                                 <button class="tool-toggle" id="deepThinkToggle" title="深度思考">
                                     <span>⚡</span>
@@ -860,6 +903,7 @@
                             </div>
                         </div>
                     </div>
+                    <div class="chat-input-footer">本地智能助手，自主规划执行，回答仅供参考，关键信息请仔细甄别。</div>
                 </div>
             </div>
         </section>
@@ -922,11 +966,11 @@
             .catch(() => {});
     }
 
-    // ========== 侧边栏导航 ==========
-    document.querySelectorAll('.sidebar .nav-item').forEach(item => {
+    // ========== 顶部导航切换 ==========
+    document.querySelectorAll('.nav-tabs .nav-item').forEach(item => {
         item.addEventListener('click', function() {
             const page = this.dataset.page;
-            document.querySelectorAll('.sidebar .nav-item').forEach(i => i.classList.remove('active'));
+            document.querySelectorAll('.nav-tabs .nav-item').forEach(i => i.classList.remove('active'));
             this.classList.add('active');
             document.querySelectorAll('.page-section').forEach(s => s.classList.remove('active'));
             document.getElementById('page-' + page).classList.add('active');
@@ -948,6 +992,24 @@
     let currentBotWrapper = null;
     let streamCompleted = false;
     let receivedChunks = 0;
+
+    // 更新会话数量徽章
+    function updateConvBadge() {
+        const badge = document.getElementById('convBadge');
+        if (!badge) return;
+        const count = conversations.length;
+        if (count > 0) {
+            badge.textContent = count;
+            badge.style.display = 'inline';
+        } else {
+            badge.style.display = 'none';
+        }
+    }
+
+    // 监听会话列表 DOM 变化，自动更新徽章
+    new MutationObserver(updateConvBadge).observe(
+        document.getElementById('convList'), { childList: true }
+    );
 
     function loadConversations() {
         fetch('/chat/conversation/list')

@@ -77,10 +77,6 @@ public class WebSearchReactAgent extends BaseAgent {
      */
     private final List<Advisor> advisors;
 
-    /**
-     * 最大反思轮数
-     */
-    private final int maxReflectionRounds;
 
 
     /**
@@ -90,7 +86,7 @@ public class WebSearchReactAgent extends BaseAgent {
      * @param builder Builder实例，包含所有配置参数
      */
     private WebSearchReactAgent(Builder builder) { // 私有构造方法，通过Builder创建
-        super(builder.name != null ? builder.name : "WebSearchAgent", builder.chatModel, "websearch"); // 调用父类构造，设置Agent名称、聊天模型和类型标识
+        super(builder.name != null ? builder.name : "WebSearchAgent", builder.chatModel, "webSearch"); // 调用父类构造，设置Agent名称、聊天模型和类型标识
         this.tools = builder.tools; // 设置可用工具数组
         this.systemPrompt = builder.systemPrompt; // 设置自定义系统提示词
         this.maxRounds = builder.maxRounds; // 设置最大推理轮次
@@ -100,11 +96,8 @@ public class WebSearchReactAgent extends BaseAgent {
         this.chatMessageService = builder.chatMessageService; // 设置消息服务（字段继承自BaseAgent）
         this.agentPromptService = builder.agentPromptService;
         this.taskManager = builder.taskManager; // 设置任务管理器（字段继承自BaseAgent）
-        this.maxReflectionRounds = builder.maxReflectionRounds;
         this.usedTools = new HashSet<>(); // 初始化已使用工具记录集合
-
         initChatClient(); // 初始化ChatClient实例
-
         if (this.chatClient == null) { // 验证ChatClient是否初始化成功
             throw new IllegalStateException("ChatClient 初始化失败！"); // 初始化失败时抛出异常
         }
@@ -161,8 +154,10 @@ public class WebSearchReactAgent extends BaseAgent {
         final String convId = resolveConversationId(conversationId, question);
         // 检查是否已有任务在执行，避免同一会话并发执行多个任务
         Flux<String> checkResult = checkRunningTask(convId); // 调用BaseAgent方法检查运行中任务
-        if (checkResult != null) { // 如果有正在运行的任务
-            return checkResult; // 直接返回错误Flux，拒绝重复执行
+        // 如果有正在运行的任务
+        if (checkResult != null) {
+            // 直接返回错误Flux，拒绝重复执行
+            return checkResult;
         }
         // 创建单播Sink并启用背压缓冲
         Sinks.Many<String> sink = Sinks.many().unicast().onBackpressureBuffer();
@@ -173,6 +168,8 @@ public class WebSearchReactAgent extends BaseAgent {
             // 返回错误流
             return Flux.error(new IllegalStateException("该会话正在执行中，请稍后再试"));
         }
+        // 清除之前记录的工具使用记录
+        clearUsedTools();
         // 构建初始消息列表（System Prompt + 历史记忆 + 当前问题），并保存用户问题
         List<Message> messages = buildInitialMessages(convId, question);
         //设置当前会话问题

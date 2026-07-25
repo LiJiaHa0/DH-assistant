@@ -10,7 +10,11 @@ public enum PromptKey {
 
     SYSTEM_PROMPT("system_prompt", "系统提示词"),
     RECOMMEND_PROMPT("recommend_prompt", "推荐问题生成提示词"),
-    COMPACT_SUMMARY("compact_summary", "上下文压缩摘要提示词");
+    COMPACT_SUMMARY("compact_summary", "上下文压缩摘要提示词"),
+    REQUIREMENT_CLARIFICATION("requirement_clarification", "需求澄清提示词"),
+
+    ;
+
 
     private final String code;
     private final String description;
