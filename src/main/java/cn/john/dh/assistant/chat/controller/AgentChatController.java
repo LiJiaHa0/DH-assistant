@@ -1,6 +1,7 @@
 package cn.john.dh.assistant.chat.controller;
 
 import cn.john.dh.assistant.agent.AgentTaskManager;
+import cn.john.dh.assistant.agent.deepresearch.PlanExecuteAgent;
 import cn.john.dh.assistant.agent.websearch.WebSearchReactAgent;
 import cn.john.dh.assistant.chat.service.ChatConversationService;
 import cn.john.dh.assistant.chat.service.ChatMessageService;
@@ -62,6 +63,9 @@ public class AgentChatController implements InitializingBean {
     // MCP搜索工具回调数组
     private ToolCallback[] webSearchToolCallbacks;
 
+    // Tavily API Key 是否已配置（未配置时不做重试，避免无意义的重复初始化）
+    private boolean tavilyKeyConfigured = false;
+
     // 任务管理器
     private final AgentTaskManager taskManager;
 
@@ -118,6 +122,66 @@ public class AgentChatController implements InitializingBean {
         }
     }
 
+    /**
+     * 深度研究流式端点
+     * 接收用户查询并返回SSE流式响应，使用计划-执行模式进行深度研究
+     *
+     * @param query          用户研究问题
+     * @param conversationId 对话ID
+     * @return SSE流式响应
+     */
+    @GetMapping(value = "/deep/stream", produces = "text/event-stream;charset=UTF-8")
+    public Flux<String> deepStream(
+            @RequestParam String query,
+            @RequestParam String conversationId) {
+        // 记录请求日志
+        log.info("收到深度研究请求: query={}, conversationId={}", query, conversationId);
+
+        // 校验查询参数非空
+        if (query == null || query.trim().isEmpty()) {
+            log.warn("查询参数为空或无效");
+            return Flux.error(new IllegalArgumentException("查询参数不能为空"));
+        }
+
+        try {
+            // 初始化深度研究Agent
+            PlanExecuteAgent agent = initPlanExecuteAgent();
+            // 执行Agent并返回SSE流
+            return agent.execute(conversationId, query);
+        } catch (Exception e) {
+            // 记录处理错误日志
+            log.error("处理深度研究请求时发生错误: ", e);
+            return Flux.error(e);
+        }
+    }
+
+    /**
+     * 初始化PlanExecute Agent（深度研究）
+     * 配置ChatModel、会话服务、任务管理器、搜索工具和最大研究轮次
+     *
+     * @return 配置完成的PlanExecuteAgent实例
+     */
+    private PlanExecuteAgent initPlanExecuteAgent() {
+        // 记录初始化日志
+        log.info("初始化 PlanExecute Agent...");
+
+        // 构建并返回深度研究Agent
+        return PlanExecuteAgent.builder()
+                // 设置聊天模型
+                .chatModel(chatModel)
+                // 设置会话服务
+                .chatConversationService(chatConversationService)
+                .chatMessageService(chatMessageService)
+                .agentPromptService(agentPromptService)
+                // 设置任务管理器
+                .taskManager(taskManager)
+                // 设置MCP搜索工具（懒加载：启动时初始化失败则在此重试）
+                .tools(ensureWebSearchToolCallbacks())
+                // 设置最大研究轮次为3
+                .maxRounds(3)
+                .build();
+    }
+
 
     /**
      * 停止指定会话的Agent执行
@@ -158,8 +222,8 @@ public class AgentChatController implements InitializingBean {
                 .agentPromptService(agentPromptService)
                 // 设置任务管理器
                 .taskManager(taskManager)
-                // 设置MCP搜索工具
-                .tools(webSearchToolCallbacks)
+                // 设置MCP搜索工具（懒加载：启动时初始化失败则在此重试）
+                .tools(ensureWebSearchToolCallbacks())
                 .build();
     }
 
@@ -179,6 +243,22 @@ public class AgentChatController implements InitializingBean {
     }
 
     /**
+     * 确保网页搜索工具回调可用（懒加载重试）
+     * 启动时若因网络抖动/SSL握手失败导致初始化失败，工具数组会为空；
+     * 此处发现为空且API Key已配置时重新初始化一次，避免工具能力永久失效
+     *
+     * @return 可用的工具回调数组
+     */
+    private synchronized ToolCallback[] ensureWebSearchToolCallbacks() {
+        // API Key已配置但工具数组为空，说明之前初始化失败，尝试重新初始化
+        if (tavilyKeyConfigured && (webSearchToolCallbacks == null || webSearchToolCallbacks.length == 0)) {
+            log.warn("网页搜索工具不可用，尝试重新初始化 Tavily MCP 工具...");
+            initWebSearchToolCallbacks();
+        }
+        return webSearchToolCallbacks;
+    }
+
+    /**
      * 初始化网页搜索工具回调
      * 通过Tavily MCP协议连接搜索引擎，获取搜索工具回调
      */
@@ -189,10 +269,14 @@ public class AgentChatController implements InitializingBean {
         if (tavilyApiKey == null || tavilyApiKey.isEmpty() || tavilyApiKey.equals("tvly-dev-placeholder")) {
             // API Key未配置时记录警告日志
             log.warn("Tavily API key 未配置，网页搜索功能将不可用");
+            // 标记未配置，后续不再重试
+            tavilyKeyConfigured = false;
             // 使用空工具数组
             webSearchToolCallbacks = new ToolCallback[0];
             return;
         }
+        // 标记API Key已配置
+        tavilyKeyConfigured = true;
         try {
             // 构建Tavily MCP认证请求头
             String authorizationHeader = "Bearer " + tavilyApiKey;

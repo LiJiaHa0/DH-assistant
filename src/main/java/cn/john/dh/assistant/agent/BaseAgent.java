@@ -246,7 +246,11 @@ public abstract class BaseAgent {
         messages.add(new UserMessage("请根据当前问题生成会话标题：" + question));
         Thread.ofVirtual().name("title" + conversation).start(() -> {
             // 使用chatModel构建ChatClient
-            String response = ChatClient.builder(chatModel).defaultOptions(DashScopeChatOptions.builder().model("qwen-turbo").enableThinking(false).build()).build()
+            String response = ChatClient.builder(chatModel)
+                    .defaultOptions(DashScopeChatOptions.builder()
+                            .model("qwen-turbo")
+                            .enableThinking(false)
+                            .build()).build()
                     // 创建提示词请求
                     .prompt()
                     // 设置消息列表
@@ -328,6 +332,9 @@ public abstract class BaseAgent {
         return AgentResponse.complete();
     }
 
+    /** 流式分块间隔（毫秒），模拟打字机效果，避免前端瞬间渲染全部内容 */
+    private static final long STREAM_CHUNK_DELAY_MS = 30L;
+
     /**
      * 发送响应（带思考缓冲区参数版本）
      * 内容过长时自动拆分为 3~7 字符分块，模拟流式逐字推送
@@ -338,9 +345,9 @@ public abstract class BaseAgent {
      * @param type     响应类型（text/thinking）
      */
     protected void emit(Sinks.Many<String> sink,
-                      AtomicBoolean finished,
-                      String content,
-                      String type) {
+                        AtomicBoolean finished,
+                        String content,
+                        String type) {
         // 如果流程已完成，不再发送
         if (finished.get() || content == null || content.isEmpty()) {
             return;
@@ -359,9 +366,62 @@ public abstract class BaseAgent {
             }
             // 随机决定本块长度（3~7字符，剩余不足时取剩余部分）
             int chunkLen = Math.min(ThreadLocalRandom.current().nextInt(3, 8), content.length() - offset);
-            String chunk = content.substring(offset, offset + chunkLen);
+            int end = offset + chunkLen;
+            // 避免切割代理对：emoji等增补字符由2个char组成，若切点落在高低代理之间则向后顺延一位
+            if (end < content.length() && Character.isHighSurrogate(content.charAt(end - 1))) {
+                end++;
+            }
+            String chunk = content.substring(offset, end);
             doSend(sink, chunk, type);
-            offset += chunkLen;
+            // 分块间短暂延迟，模拟打字机效果，避免前端瞬间渲染全部内容
+            try {
+                Thread.sleep(STREAM_CHUNK_DELAY_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            offset = end;
+        }
+    }
+
+    /**
+     * 流式发送响应（分块 + 代理对保护 + 并发安全）
+     * 内容自动拆分为 3~7 字符分块逐段发送，模拟流式逐字推送效果；
+     * 切点处检测UTF-16代理对（emoji等增补字符），若切点落在高低代理之间则顺延一位，保证emoji不被切割；
+     * 与emit的区别：在整个分块过程中持有sink锁，保证一条消息的所有小块连续发送完毕，
+     * 不会被其他并发任务的小块穿插交错（emit每个小块各自加锁，适合单线程LLM流式输出）。
+     *
+     * @param sink     响应流信号发射器
+     * @param finished 完成标记
+     * @param content  响应内容
+     * @param type     响应类型（text/thinking）
+     */
+    protected void emitAtomic(Sinks.Many<String> sink,
+                              AtomicBoolean finished,
+                              String content,
+                              String type) {
+        if (finished.get() || content == null || content.isEmpty()) {
+            return;
+        }
+        // 整个分块过程在锁内完成，保证所有小块连续发送，不被其他线程穿插
+        synchronized (sink) {
+            if (content.length() <= 7) {
+                sendChunk(sink, content, type);
+                return;
+            }
+            int offset = 0;
+            while (offset < content.length()) {
+                if (finished.get()) {
+                    return;
+                }
+                int chunkLen = Math.min(ThreadLocalRandom.current().nextInt(3, 8), content.length() - offset);
+                int end = offset + chunkLen;
+                if (end < content.length() && Character.isHighSurrogate(content.charAt(end - 1))) {
+                    end++;
+                }
+                sendChunk(sink, content.substring(offset, end), type);
+                offset = end;
+            }
         }
     }
 
@@ -374,8 +434,8 @@ public abstract class BaseAgent {
      * @param e        异常对象
      */
     protected void error(Sinks.Many<String> sink,
-                       AtomicBoolean finished,
-                       Throwable e) {
+                         AtomicBoolean finished,
+                         Throwable e) {
 
         // CAS操作：仅当finished为false时设为true
         if (finished.compareAndSet(false, true)) {
@@ -385,17 +445,33 @@ public abstract class BaseAgent {
     }
 
     /**
-     * 实际发送单个分块
+     * 实际发送单个分块（不加锁，由调用方负责同步）
      *
-     * @param sink    响应流信号发射器
-     * @param chunk   本次发送的文本片段
-     * @param type    响应类型（text/thinking）
+     * @param sink  响应流信号发射器
+     * @param chunk 本次发送的文本片段
+     * @param type  响应类型（text/thinking）
      */
-    private void doSend(Sinks.Many<String> sink, String chunk, String type) {
+    private void sendChunk(Sinks.Many<String> sink, String chunk, String type) {
         if ("thinking".equals(type)) {
             sink.tryEmitNext(createThinkingResponse(chunk));
         } else {
             sink.tryEmitNext(createTextResponse(chunk));
+        }
+    }
+
+    /**
+     * 实际发送单个分块（加锁版本，供emit单线程流式输出使用）
+     * 注意：unicast sink的tryEmitNext非线程安全，并发任务多线程同时emit会返回
+     * FAIL_NON_SERIALIZED导致消息静默丢失（如某个任务的"正在执行任务"提示不显示）。
+     * 用synchronized串行化emit，保证并发场景下每条消息都能成功发送。
+     *
+     * @param sink  响应流信号发射器
+     * @param chunk 本次发送的文本片段
+     * @param type  响应类型（text/thinking）
+     */
+    private void doSend(Sinks.Many<String> sink, String chunk, String type) {
+        synchronized (sink) {
+            sendChunk(sink, chunk, type);
         }
     }
 

@@ -51,6 +51,12 @@ public class ChatMessage extends BaseEntity {
     private String content;
 
     /**
+     * 思考过程内容（深度思考Agent的think内容）
+     */
+    @TableField("thinking_content")
+    private String thinkingContent;
+
+    /**
      * 改写后的内容
      */
     @TableField("transform_content")

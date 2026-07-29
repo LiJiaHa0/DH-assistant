@@ -7,6 +7,7 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>DH Assistant - 智能助手</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -450,6 +451,69 @@
             border-bottom-left-radius: 4px;
         }
 
+        /* ========== bot消息正文Markdown样式 ========== */
+        .msg-row.bot .msg-bubble h1,
+        .msg-row.bot .msg-bubble h2,
+        .msg-row.bot .msg-bubble h3,
+        .msg-row.bot .msg-bubble h4 {
+            margin: 14px 0 8px;
+            line-height: 1.4;
+        }
+        .msg-row.bot .msg-bubble h1 { font-size: 20px; }
+        .msg-row.bot .msg-bubble h2 { font-size: 18px; }
+        .msg-row.bot .msg-bubble h3 { font-size: 16px; }
+        .msg-row.bot .msg-bubble h4 { font-size: 15px; }
+        .msg-row.bot .msg-bubble p { margin: 8px 0; }
+        .msg-row.bot .msg-bubble ul,
+        .msg-row.bot .msg-bubble ol {
+            margin: 8px 0;
+            padding-left: 22px;
+        }
+        .msg-row.bot .msg-bubble li { margin: 4px 0; }
+        .msg-row.bot .msg-bubble code {
+            background: rgba(0,0,0,0.06);
+            padding: 2px 5px;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: 'SF Mono', Menlo, Consolas, monospace;
+        }
+        .msg-row.bot .msg-bubble pre {
+            background: #282c34;
+            color: #e6e6e6;
+            padding: 12px 14px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+        .msg-row.bot .msg-bubble pre code {
+            background: transparent;
+            padding: 0;
+            color: inherit;
+        }
+        .msg-row.bot .msg-bubble blockquote {
+            border-left: 3px solid var(--primary);
+            padding-left: 12px;
+            margin: 8px 0;
+            color: var(--text-light);
+        }
+        .msg-row.bot .msg-bubble table {
+            border-collapse: collapse;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+        .msg-row.bot .msg-bubble th,
+        .msg-row.bot .msg-bubble td {
+            border: 1px solid #ddd;
+            padding: 6px 10px;
+        }
+        .msg-row.bot .msg-bubble th { background: rgba(0,0,0,0.04); }
+        .msg-row.bot .msg-bubble a { color: var(--primary); }
+        .msg-row.bot .msg-bubble hr {
+            border: none;
+            border-top: 1px solid #ddd;
+            margin: 12px 0;
+        }
+
         .msg-time {
             font-size: 12px;
             color: #bbb;
@@ -796,40 +860,43 @@
         <!-- 项目介绍页 -->
         <section class="page-section intro-page" id="page-intro">
             <h2>欢迎使用 DH Assistant</h2>
-            <p class="intro-subtitle">一款基于 AI 的智能文档管理与问答助手</p>
+            <p class="intro-subtitle">基于 AI 的深度研究智能助手</p>
 
             <div class="intro-card">
                 <h3>📌 项目简介</h3>
-                <p>DH Assistant 是一个面向企业客户的智能文档管理与问答系统。系统支持用户注册登录后，通过自然语言与 AI 助手进行对话，快速获取文档知识、解答业务问题，提升工作效率。</p>
+                <p>DH Assistant 是一款集联网搜索与深度研究于一体的 AI 智能助手。用户通过自然语言提问，AI 自主调用搜索工具、规划研究方案、多轮迭代执行并生成结构化报告，全程实时流式推送思考过程与参考来源，让 AI 的推理透明可见。</p>
             </div>
 
             <div class="intro-card">
                 <h3>✨ 核心功能</h3>
                 <ul class="feature-list">
-                    <li><span class="dot"></span>用户注册与登录（手机号 + 密码）</li>
-                    <li><span class="dot"></span>智能问答对话（基于大语言模型）</li>
-                    <li><span class="dot"></span>文档知识库管理</li>
-                    <li><span class="dot"></span>对话历史记录</li>
-                    <li><span class="dot"></span>多用户权限隔离</li>
+                    <li><span class="dot"></span>联网搜索 — 基于 Tavily MCP 实时检索网络信息，React Agent 自主决策搜索策略</li>
+                    <li><span class="dot"></span>深度研究 — Plan-Execute 架构，需求澄清 → 生成研究计划 → 并发执行任务 → 评审迭代 → 生成最终报告</li>
+                    <li><span class="dot"></span>流式输出 — SSE 实时推送思考过程、搜索结果、参考来源与推荐问题，打字机效果逐字呈现</li>
+                    <li><span class="dot"></span>会话管理 — 对话历史持久化存储，支持多轮上下文记忆与随时回看</li>
+                    <li><span class="dot"></span>用户认证 — 注册登录，Sa-Token 会话隔离，多用户数据互不干扰</li>
                 </ul>
             </div>
 
             <div class="intro-card">
                 <h3>🛠 技术栈</h3>
                 <div class="tech-tags">
-                    <span class="tag">Spring Boot 3.x</span>
+                    <span class="tag">Spring Boot 4.x</span>
+                    <span class="tag">Spring AI</span>
+                    <span class="tag">DashScope (Qwen)</span>
+                    <span class="tag">Tavily MCP</span>
                     <span class="tag">MyBatis-Plus</span>
                     <span class="tag">Sa-Token</span>
                     <span class="tag">MySQL</span>
                     <span class="tag">Redis</span>
+                    <span class="tag">Reactor SSE</span>
                     <span class="tag">Druid</span>
-                    <span class="tag">DashScope AI</span>
                 </div>
             </div>
 
             <div class="intro-card">
                 <h3>🚀 快速开始</h3>
-                <p>点击顶部导航栏中的 <strong>"聊天"</strong> 即可开始与 AI 对话。</p>
+                <p>点击顶部导航栏中的 <strong>"聊天"</strong> 进入对话页面，在输入框下方切换 <strong>联网</strong> 或 <strong>深度思考</strong> 模式（两者互斥），输入问题即可开始。</p>
             </div>
         </section>
 
@@ -862,10 +929,10 @@
                         <h4>你好呀 有什么可以帮你的？</h4>
                         <p>试试下面的问题开始吧</p>
                         <div class="quick-questions">
-                            <button class="q-btn" onclick="sendQuickQuestion('这个系统有哪些主要功能？')">💬 这个系统有哪些主要功能？</button>
-                            <button class="q-btn" onclick="sendQuickQuestion('如何管理文档知识库？')">💬 如何管理文档知识库？</button>
-                            <button class="q-btn" onclick="sendQuickQuestion('帮我介绍一下技术架构')">💬 帮我介绍一下技术架构</button>
-                            <button class="q-btn" onclick="sendQuickQuestion('有哪些常用的提示词技巧？')">💬 有哪些常用的提示词技巧？</button>
+                            <button class="q-btn" onclick="sendQuickQuestion('2025年AI Agent领域有哪些重要技术突破？')">🔍 2025年AI Agent领域有哪些重要技术突破？</button>
+                            <button class="q-btn" onclick="sendQuickQuestion('深度对比React和Vue3的响应式原理')">⚡ 深度对比React和Vue3的响应式原理</button>
+                            <button class="q-btn" onclick="sendQuickQuestion('帮我调研一下大模型推理优化的最新进展')">🔎 帮我调研一下大模型推理优化的最新进展</button>
+                            <button class="q-btn" onclick="sendQuickQuestion('Spring Boot 4有哪些重要变化？')">💡 Spring Boot 4有哪些重要变化？</button>
                         </div>
                     </div>
                 </div>
@@ -990,6 +1057,7 @@
     let currentEventSource = null;
     let currentThinkingText = '';
     let currentBotWrapper = null;
+    let currentBotText = '';  // 流式正文Markdown原始文本缓冲区
     let streamCompleted = false;
     let receivedChunks = 0;
 
@@ -1100,6 +1168,10 @@
                         const role = msg.type === 'USER' ? 'user' : 'bot';
                         const timeStr = formatDateTime(msg.createdAt);
                         const wrapper = appendMessage(role, msg.content, timeStr);
+                        // 优先使用独立字段thinkingContent渲染思考过程（深度思考Agent的存储方式）
+                        if (role === 'bot' && wrapper && msg.thinkingContent) {
+                            renderHistoryThinking(wrapper, msg.thinkingContent);
+                        }
                         if (role === 'bot' && wrapper && msg.metadata) {
                             renderHistoryMetadata(wrapper, msg.metadata);
                         }
@@ -1176,12 +1248,14 @@
         this.style.height = Math.min(this.scrollHeight, maxH) + 'px';
     });
 
-    // 工具切换按钮
-    document.getElementById('deepThinkToggle').addEventListener('click', function() {
-        this.classList.toggle('active');
-    });
+    // 工具切换按钮（互斥：联网与深度思考只能选中一个）
     document.getElementById('searchToggle').addEventListener('click', function() {
-        this.classList.toggle('active');
+        this.classList.add('active');
+        document.getElementById('deepThinkToggle').classList.remove('active');
+    });
+    document.getElementById('deepThinkToggle').addEventListener('click', function() {
+        this.classList.add('active');
+        document.getElementById('searchToggle').classList.remove('active');
     });
 
     function sendMessage() {
@@ -1227,6 +1301,7 @@
 
         isSending = true;
         currentThinkingText = '';
+        currentBotText = '';
         currentBotWrapper = null;
         streamCompleted = false;
         receivedChunks = 0;
@@ -1234,7 +1309,10 @@
 
         const typingEl = appendTyping();
 
-        const url = '/agent/chat/stream?query=' + encodeURIComponent(text)
+        // 根据深度思考开关选择接口：开启时走深度研究接口，否则走普通搜索接口
+        const deepThinkOn = document.getElementById('deepThinkToggle').classList.contains('active');
+        const streamPath = deepThinkOn ? '/agent/deep/stream' : '/agent/chat/stream';
+        const url = streamPath + '?query=' + encodeURIComponent(text)
                   + '&conversationId=' + (isTempConversation() ? '' : encodeURIComponent(currentConvId));
         const es = new EventSource(url);
         currentEventSource = es;
@@ -1341,6 +1419,28 @@
         btn.style.background = '';
     }
 
+    // Markdown渲染器配置
+    if (window.marked && marked.setOptions) {
+        marked.setOptions({ gfm: true, breaks: true });
+    }
+
+    /**
+     * 渲染Markdown文本为HTML
+     * 优先使用marked库，不可用时降级为转义文本
+     * @param text Markdown源文本
+     * @returns HTML字符串
+     */
+    function renderMarkdown(text) {
+        if (window.marked && typeof marked.parse === 'function') {
+            try {
+                return marked.parse(text || '');
+            } catch (e) {
+                console.warn('marked.parse failed:', e);
+            }
+        }
+        return escapeHtml(text || '').replace(/\n/g, '<br>');
+    }
+
     // ========== SSE 事件处理 ==========
     function ensureBotMessage() {
         if (!currentBotWrapper) {
@@ -1368,6 +1468,8 @@
 
     function handleTextChunk(content) {
         if (!content) return;
+        // 累积原始Markdown文本（流式分块拼接），每次重新整体渲染保证Markdown结构完整性
+        currentBotText += content;
         const wrapper = ensureBotMessage();
         let bubble = wrapper.querySelector('.msg-bubble');
         if (!bubble) {
@@ -1375,7 +1477,7 @@
             bubble.className = 'msg-bubble';
             wrapper.appendChild(bubble);
         }
-        bubble.innerHTML += escapeHtml(content).replace(/\n/g, '<br>');
+        bubble.innerHTML = renderMarkdown(currentBotText);
     }
 
     function handleReferences(content, count) {
@@ -1387,23 +1489,68 @@
             try { refs = JSON.parse(content); } catch(e) { return; }
         }
         if (!Array.isArray(refs) || refs.length === 0) return;
+        const refDiv = buildRefDetails(refs);
+        wrapper.appendChild(refDiv);
+    }
 
+    /**
+     * 构建参考来源详情块
+     * 默认显示5条，每点击“展开更多”新增10条
+     * @param refs 参考来源数组
+     * @returns HTMLElement details元素
+     */
+    function buildRefDetails(refs) {
         const refDiv = document.createElement('details');
         refDiv.open = true;
         refDiv.style.cssText = 'margin-top:10px;font-size:13px;';
         refDiv.innerHTML = '<summary style="cursor:pointer;color:var(--text-light);user-select:none;">📎 参考来源 (' + refs.length + ')</summary>';
         const list = document.createElement('div');
         list.style.cssText = 'margin-top:6px;';
-        refs.forEach((ref, i) => {
-            const item = document.createElement('div');
-            item.style.cssText = 'padding:4px 0;border-bottom:1px solid #f0f0f0;';
-            item.innerHTML = '<a href="' + escapeHtml(ref.url || '#') + '" target="_blank" rel="noopener" '
-                + 'style="color:var(--primary);text-decoration:none;font-size:13px;">'
-                + (i + 1) + '. ' + escapeHtml(ref.title || ref.url || '参考链接') + '</a>';
-            list.appendChild(item);
-        });
+        // 每次展开新增的数量
+        const INITIAL_COUNT = 5;
+        const STEP = 10;
+        // 当前显示数量（默认前5条）
+        let shown = Math.min(INITIAL_COUNT, refs.length);
+        // 渲染前shown条
+        for (let i = 0; i < shown; i++) {
+            list.appendChild(buildRefItem(refs[i], i));
+        }
         refDiv.appendChild(list);
-        wrapper.appendChild(refDiv);
+        // 如果还有剩余，添加“展开更多”按钮
+        if (shown < refs.length) {
+            const moreBtn = document.createElement('button');
+            moreBtn.style.cssText = 'margin-top:8px;padding:4px 10px;background:rgba(102,126,234,0.08);'
+                + 'color:var(--primary);border:1px solid rgba(102,126,234,0.2);border-radius:12px;'
+                + 'font-size:12px;cursor:pointer;';
+            const updateBtnText = () => {
+                const remaining = refs.length - shown;
+                moreBtn.textContent = remaining > 0 ? '展开更多 (' + remaining + ' 条)' : '';
+            };
+            updateBtnText();
+            moreBtn.addEventListener('click', () => {
+                // 每次点击展开10条（或剩余全部）
+                const nextCount = Math.min(STEP, refs.length - shown);
+                for (let i = shown; i < shown + nextCount; i++) {
+                    list.appendChild(buildRefItem(refs[i], i));
+                }
+                shown += nextCount;
+                updateBtnText();
+                if (shown >= refs.length) {
+                    moreBtn.style.display = 'none';
+                }
+            });
+            refDiv.appendChild(moreBtn);
+        }
+        return refDiv;
+    }
+
+    function buildRefItem(ref, index) {
+        const item = document.createElement('div');
+        item.style.cssText = 'padding:4px 0;border-bottom:1px solid #f0f0f0;';
+        item.innerHTML = '<a href="' + escapeHtml(ref.url || '#') + '" target="_blank" rel="noopener" '
+            + 'style="color:var(--primary);text-decoration:none;font-size:13px;">'
+            + (index + 1) + '. ' + escapeHtml(ref.title || ref.url || '参考链接') + '</a>';
+        return item;
     }
 
     function handleRecommendations(content) {
@@ -1460,11 +1607,25 @@
         }
         currentBotWrapper = null;
         currentThinkingText = '';
+        currentBotText = '';
     }
 
-    function scrollChatToBottom() {
+    // 智能吸底标记：用户往上滑时暂停自动滚动，滑回底部附近时恢复
+    let autoScrollEnabled = true;
+
+    // 监听聊天区域滚动：根据用户滚动位置动态开关自动吸底
+    document.getElementById('chatMessages').addEventListener('scroll', function() {
+        // 距离底部小于60px视为在底部，恢复自动滚动；否则认为用户在查看历史，暂停自动滚动
+        const distanceToBottom = this.scrollHeight - this.scrollTop - this.clientHeight;
+        autoScrollEnabled = distanceToBottom < 60;
+    });
+
+    function scrollChatToBottom(force) {
+        // 非强制滚动时，若用户正在查看历史记录则不打断
+        if (!force && !autoScrollEnabled) return;
         const container = document.getElementById('chatMessages');
         container.scrollTop = container.scrollHeight;
+        autoScrollEnabled = true;
     }
 
     // ========== 消息DOM操作 ==========
@@ -1480,7 +1641,12 @@
         const wrapper = document.createElement('div');
         const bubble = document.createElement('div');
         bubble.className = 'msg-bubble';
-        bubble.innerHTML = escapeHtml(text || '').replace(/\n/g, '<br>');
+        // bot消息正文按Markdown渲染，用户消息保持纯文本转义
+        if (role === 'bot') {
+            bubble.innerHTML = renderMarkdown(text || '');
+        } else {
+            bubble.innerHTML = escapeHtml(text || '').replace(/\n/g, '<br>');
+        }
 
         const time = document.createElement('div');
         time.className = 'msg-time';
@@ -1491,7 +1657,8 @@
         row.appendChild(avatar);
         row.appendChild(wrapper);
         container.appendChild(row);
-        container.scrollTop = container.scrollHeight;
+        // 新增完整消息（用户发送/历史加载）时强制滚动到底部
+        scrollChatToBottom(true);
         return wrapper;
     }
 
@@ -1536,7 +1703,8 @@
         row.appendChild(avatar);
         row.appendChild(wrapper);
         container.appendChild(row);
-        container.scrollTop = container.scrollHeight;
+        // 流式回复壳创建时遵循智能吸底，不打断用户浏览
+        scrollChatToBottom();
         return wrapper;
     }
 
@@ -1555,8 +1723,23 @@
         row.appendChild(avatar);
         row.appendChild(wrapper);
         container.appendChild(row);
-        container.scrollTop = container.scrollHeight;
+        // typing指示器紧跟用户提问出现，强制滚动到底部
+        scrollChatToBottom(true);
         return row;
+    }
+
+    // ========== 历史消息思考过程渲染 ==========
+    function renderHistoryThinking(wrapper, thinkingText) {
+        // 已渲染过思考块则跳过，避免thinkingContent与metadata.thinking重复渲染
+        if (!thinkingText || wrapper.querySelector('.thinking-block')) return;
+        const thinkEl = document.createElement('details');
+        thinkEl.open = true;
+        thinkEl.className = 'thinking-block';
+        thinkEl.style.cssText = 'margin-bottom:8px;font-size:13px;';
+        thinkEl.innerHTML = '<summary style="cursor:pointer;color:var(--text-light);user-select:none;">💭 思考过程</summary>'
+            + '<div class="thinking-content" style="margin-top:6px;color:#666;white-space:pre-wrap;line-height:1.6;"></div>';
+        thinkEl.querySelector('.thinking-content').textContent = thinkingText;
+        wrapper.insertBefore(thinkEl, wrapper.firstChild);
     }
 
     // ========== 历史消息 metadata 渲染 ==========
@@ -1568,35 +1751,14 @@
             meta = metadata;
         }
 
-        // 渲染思考过程
+        // 渲染思考过程（兼容旧数据：思考内容存在metadata.thinking中）
         if (meta.thinking) {
-            const thinkEl = document.createElement('details');
-            thinkEl.open = true;
-            thinkEl.className = 'thinking-block';
-            thinkEl.style.cssText = 'margin-bottom:8px;font-size:13px;';
-            thinkEl.innerHTML = '<summary style="cursor:pointer;color:var(--text-light);user-select:none;">💭 思考过程</summary>'
-                + '<div class="thinking-content" style="margin-top:6px;color:#666;white-space:pre-wrap;line-height:1.6;"></div>';
-            thinkEl.querySelector('.thinking-content').textContent = meta.thinking;
-            wrapper.insertBefore(thinkEl, wrapper.firstChild);
+            renderHistoryThinking(wrapper, meta.thinking);
         }
 
-        // 渲染参考来源
+        // 渲染参考来源（默认5条，支持展开更多）
         if (meta.references && Array.isArray(meta.references) && meta.references.length > 0) {
-            const refDiv = document.createElement('details');
-            refDiv.open = true;
-            refDiv.style.cssText = 'margin-top:10px;font-size:13px;';
-            refDiv.innerHTML = '<summary style="cursor:pointer;color:var(--text-light);user-select:none;">📎 参考来源 (' + meta.references.length + ')</summary>';
-            const list = document.createElement('div');
-            list.style.cssText = 'margin-top:6px;';
-            meta.references.forEach((ref, i) => {
-                const item = document.createElement('div');
-                item.style.cssText = 'padding:4px 0;border-bottom:1px solid #f0f0f0;';
-                item.innerHTML = '<a href="' + escapeHtml(ref.url || '#') + '" target="_blank" rel="noopener" '
-                    + 'style="color:var(--primary);text-decoration:none;font-size:13px;">'
-                    + (i + 1) + '. ' + escapeHtml(ref.title || ref.url || '参考链接') + '</a>';
-                list.appendChild(item);
-            });
-            refDiv.appendChild(list);
+            const refDiv = buildRefDetails(meta.references);
             wrapper.insertBefore(refDiv, wrapper.querySelector('.msg-time'));
         }
 

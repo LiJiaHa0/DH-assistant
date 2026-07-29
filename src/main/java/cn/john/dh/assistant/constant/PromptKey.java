@@ -12,6 +12,11 @@ public enum PromptKey {
     RECOMMEND_PROMPT("recommend_prompt", "推荐问题生成提示词"),
     COMPACT_SUMMARY("compact_summary", "上下文压缩摘要提示词"),
     REQUIREMENT_CLARIFICATION("requirement_clarification", "需求澄清提示词"),
+    RESEARCH_TOPIC_GENERATION("research_topic_generation", "研究主题生成提示词"),
+    PLAN("plan", "生成计划提示词"),
+    EXECUTE_PLAN("execute_plan", "执行计划提示词"),
+    CRITIQUE("critique", "评审提示词"),
+    TOOL_EXECUTE("tool_execute", "工具执行提示词"),
 
     ;
 
