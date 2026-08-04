@@ -9,7 +9,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
     org.springframework.ai.model.openai.autoconfigure.OpenAiAudioSpeechAutoConfiguration.class,
     org.springframework.ai.model.openai.autoconfigure.OpenAiAudioTranscriptionAutoConfiguration.class,
     org.springframework.ai.model.openai.autoconfigure.OpenAiImageAutoConfiguration.class,
-    org.springframework.ai.model.openai.autoconfigure.OpenAiModerationAutoConfiguration.class
+    org.springframework.ai.model.openai.autoconfigure.OpenAiModerationAutoConfiguration.class,
+    org.springframework.ai.vectorstore.milvus.autoconfigure.MilvusVectorStoreAutoConfiguration.class
 })
 public class DhAssistantApplication {
 

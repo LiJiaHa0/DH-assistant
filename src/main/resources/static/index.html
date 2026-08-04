@@ -825,6 +825,435 @@
             .msg-row { max-width: 88%; }
             .quick-questions { grid-template-columns: 1fr; }
         }
+
+        /* ========== RAG文档上传页 ========== */
+        .rag-page {
+            flex-direction: column;
+            overflow-y: auto;
+            padding: 40px 48px;
+            align-items: center;
+        }
+        .rag-page .rag-container {
+            width: 100%;
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+        .rag-page h2 {
+            font-size: 26px;
+            color: var(--text);
+            margin-bottom: 8px;
+        }
+        .rag-page .rag-subtitle {
+            color: var(--text-light);
+            font-size: 14px;
+            margin-bottom: 32px;
+        }
+        .rag-page .rag-card {
+            background: var(--card);
+            border-radius: 12px;
+            padding: 28px 32px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            border: 1px solid var(--border);
+        }
+        .rag-page .rag-form-group {
+            margin-bottom: 20px;
+        }
+        .rag-page .rag-form-group:last-child {
+            margin-bottom: 0;
+        }
+        .rag-page .rag-label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+            font-size: 14px;
+        }
+        .rag-page .rag-label .req {
+            color: #e74c3c;
+            margin-left: 2px;
+        }
+        .rag-page .rag-label .hint {
+            color: var(--text-light);
+            font-weight: normal;
+            font-size: 12px;
+            margin-left: 6px;
+        }
+        .rag-page .rag-input,
+        .rag-page .rag-select {
+            width: 100%;
+            padding: 11px 14px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            font-size: 14px;
+            color: var(--text);
+            background: #fff;
+            outline: none;
+            transition: border-color 0.2s;
+            font-family: inherit;
+        }
+        .rag-page .rag-input:focus,
+        .rag-page .rag-select:focus {
+            border-color: var(--primary);
+        }
+        .rag-page .rag-select {
+            cursor: pointer;
+            appearance: auto;
+        }
+        .rag-page .rag-file-zone {
+            position: relative;
+            border: 2px dashed var(--border);
+            border-radius: 12px;
+            padding: 32px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+        }
+        .rag-page .rag-file-zone:hover,
+        .rag-page .rag-file-zone.dragover {
+            border-color: var(--primary);
+            background: rgba(78,110,242,0.04);
+        }
+        .rag-page .rag-file-zone input[type="file"] {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+        }
+        .rag-page .rag-file-icon {
+            font-size: 40px;
+            margin-bottom: 8px;
+        }
+        .rag-page .rag-file-text {
+            color: var(--text-light);
+            font-size: 14px;
+        }
+        .rag-page .rag-file-name {
+            margin-top: 8px;
+            color: var(--primary);
+            font-weight: 600;
+            font-size: 14px;
+            word-break: break-all;
+        }
+        .rag-page .rag-field-error {
+            color: #e74c3c;
+            font-size: 12px;
+            margin-top: 4px;
+            display: none;
+        }
+        .rag-page .rag-btn-upload {
+            width: 100%;
+            padding: 12px;
+            background: var(--primary);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+            margin-top: 4px;
+        }
+        .rag-page .rag-btn-upload:hover:not(:disabled) { opacity: 0.9; }
+        .rag-page .rag-btn-upload:disabled { opacity: 0.5; cursor: not-allowed; }
+        .rag-page .rag-progress {
+            display: none;
+            margin-top: 16px;
+        }
+        .rag-page .rag-progress-bar {
+            width: 100%;
+            height: 6px;
+            background: var(--border);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .rag-page .rag-progress-fill {
+            height: 100%;
+            width: 0%;
+            background: var(--primary);
+            transition: width 0.3s;
+        }
+        .rag-page .rag-progress-text {
+            text-align: center;
+            margin-top: 6px;
+            color: var(--text-light);
+            font-size: 13px;
+        }
+        .rag-page .rag-result {
+            margin-top: 16px;
+            padding: 14px 16px;
+            border-radius: 10px;
+            display: none;
+            font-size: 14px;
+            line-height: 1.7;
+        }
+        .rag-page .rag-result.success {
+            display: block;
+            background: #eaf6ee;
+            color: #1e7e34;
+            border: 1px solid #c3e6cb;
+        }
+        .rag-page .rag-result.error {
+            display: block;
+            background: #fdeeef;
+            color: #c0392b;
+            border: 1px solid #f5c6cb;
+        }
+        .rag-page .rag-result-title {
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        /* ========== RAG文档列表 ========== */
+        .rag-page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .rag-btn-upload-modal {
+            padding: 9px 20px;
+            background: var(--primary);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        .rag-btn-upload-modal:hover { opacity: 0.9; }
+        .rag-filter-bar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+        }
+        .rag-filter-input, .rag-filter-select {
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+            font-family: inherit;
+        }
+        .rag-filter-input { flex: 1; min-width: 180px; }
+        .rag-filter-input:focus, .rag-filter-select:focus { border-color: var(--primary); }
+        .rag-filter-select { cursor: pointer; appearance: auto; }
+        .rag-btn-search {
+            padding: 8px 18px;
+            background: var(--primary);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        .rag-btn-search:hover { opacity: 0.9; }
+        .rag-table-wrapper {
+            background: var(--card);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+            margin-bottom: 16px;
+        }
+        .rag-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .rag-table th, .rag-table td {
+            padding: 10px 14px;
+            text-align: left;
+            font-size: 14px;
+            border-bottom: 1px solid var(--border);
+        }
+        .rag-table th {
+            background: #f8f9fa;
+            color: #555;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .rag-table tbody tr:hover { background: #f8f9ff; }
+        .rag-table .rag-empty-row { text-align: center; color: var(--text-light); padding: 32px 0; }
+        .rag-table .doc-title-cell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .rag-table .doc-desc-cell { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-light); }
+        .rag-status-tag {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .rag-status-tag.uploaded { background: #cce5ff; color: #004085; }
+        .rag-status-tag.converting { background: #fff3cd; color: #856404; }
+        .rag-status-tag.converted { background: #d1ecf1; color: #0c5460; }
+        .rag-status-tag.chunked { background: #d4edda; color: #155724; }
+        .rag-status-tag.vector_stored { background: #d4edda; color: #155724; }
+        .rag-status-tag.init { background: #e9ecef; color: #6c757d; }
+        .rag-kb-tag {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .rag-kb-tag.document_search { background: #f0f4ff; color: #667eea; }
+        .rag-kb-tag.data_query { background: #fff0f0; color: #dc3545; }
+        .rag-pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 12px;
+        }
+        .rag-page-btn {
+            padding: 6px 16px;
+            border: 1px solid var(--border);
+            background: #fff;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        .rag-page-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+        .rag-page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .rag-page-info { font-size: 14px; color: #666; }
+
+        /* ========== RAG 工具栏 ========== */
+        .rag-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .rag-toolbar-left { display: flex; gap: 10px; align-items: center; }
+        .rag-toolbar-right { font-size: 13px; color: #888; }
+        .rag-btn-batch-delete {
+            padding: 8px 16px; background: #fdeeee; color: #c62828;
+            border: 1px solid #f5c6cb; border-radius: 8px;
+            font-size: 14px; font-weight: 500; cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        .rag-btn-batch-delete:hover { opacity: 0.85; }
+
+        /* ========== RAG 操作按钮 ========== */
+        .rag-action-btns { display: flex; gap: 6px; flex-wrap: nowrap; justify-content: flex-start; }
+        .rag-action-btn {
+            padding: 4px 10px; border: none; border-radius: 6px;
+            font-size: 12px; font-weight: 500; cursor: pointer;
+            transition: opacity 0.2s; white-space: nowrap; text-align: center;
+        }
+        .rag-action-btn:hover { opacity: 0.85; }
+        .rag-action-btn.btn-view { background: #e3f2fd; color: #1565c0; }
+        .rag-action-btn.btn-version { background: #e8f5e9; color: #2e7d32; }
+        .rag-action-btn.btn-edit { background: #fff8e1; color: #f57f17; }
+        .rag-action-btn.btn-delete { background: #fdeeee; color: #c62828; }
+        .rag-action-btn.btn-split { background: #e8eaf6; color: #3f51b5; }
+
+        /* ========== RAG 复选框 ========== */
+        .rag-checkbox-cell { width: 40px; text-align: center; }
+        .rag-checkbox-cell input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+
+        /* ========== RAG 版本标签 ========== */
+        .rag-version-tag { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 12px; background: #e3f2fd; color: #1565c0; }
+        .rag-version-history { display: inline-block; padding: 2px 8px; border-radius: 8px; font-size: 12px; background: #f3e5f5; color: #7b1fa2; cursor: pointer; margin-left: 4px; }
+        .rag-version-history:hover { opacity: 0.8; }
+
+        /* ========== RAG Toast ========== */
+        .rag-toast {
+            position: fixed; top: 50%; left: 50%;
+            padding: 16px 32px; border-radius: 10px; color: #fff;
+            font-size: 15px; font-weight: 500; z-index: 10000;
+            opacity: 0; transform: translate(-50%, -50%) scale(0.9);
+            transition: opacity 0.3s, transform 0.3s;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+        }
+        .rag-toast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        .rag-toast.success { background: #28a745; }
+        .rag-toast.error { background: #dc3545; }
+        .rag-toast.warning { background: #ffc107; color: #333; }
+        .rag-toast.info { background: #17a2b8; }
+
+        /* ========== RAG 模态弹窗扩展 ========== */
+        .rag-modal-dialog-lg { max-width: 900px; width: 100%; max-height: 85vh; overflow-y: auto; }
+        .rag-modal-footer { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+        .rag-modal-btn {
+            padding: 8px 18px; border: none; border-radius: 8px;
+            font-size: 14px; font-weight: 500; cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        .rag-modal-btn:hover { opacity: 0.85; }
+        .rag-modal-btn.btn-cancel { background: #f0f0f0; color: #666; }
+        .rag-modal-btn.btn-primary { background: var(--primary); color: #fff; }
+        .rag-modal-btn.btn-success { background: #28a745; color: #fff; }
+
+        /* ========== 分段列表 ========== */
+        .rag-segment-list { margin-top: 16px; }
+        .rag-segment-item {
+            border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px;
+            margin-bottom: 10px; background: #fafafa; transition: border-color 0.2s;
+        }
+        .rag-segment-item:hover { border-color: var(--primary); }
+        .rag-segment-item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .rag-segment-item-meta { font-size: 12px; color: #888; display: flex; gap: 12px; flex-wrap: wrap; }
+        .rag-segment-item-text { font-size: 14px; color: #333; line-height: 1.6; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow: hidden; }
+        .rag-segment-item-text.expanded { max-height: none; }
+        .rag-segment-toggle { font-size: 12px; color: var(--primary); cursor: pointer; margin-top: 4px; }
+
+        /* ========== 切片参数组 ========== */
+        .rag-param-group { display: none; }
+        .rag-param-group.show { display: block; }
+        .rag-param-hint { font-size: 12px; color: #888; margin-top: 4px; }
+
+        /* ========== 上传弹窗扩展 ========== */
+        .modal-dialog-lg { max-width: 560px; width: 100%; max-height: 85vh; overflow-y: auto; }
+        .modal-dialog .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .modal-dialog .modal-header h3 { font-size: 18px; color: var(--text); }
+        .modal-close { background: none; border: none; font-size: 22px; cursor: pointer; color: var(--text-light); line-height: 1; }
+        .modal-close:hover { color: var(--text); }
+
+        /* ========== 上传弹窗内表单样式（脱离.rag-page作用域） ========== */
+        .modal-dialog .rag-form-group { margin-bottom: 20px; }
+        .modal-dialog .rag-form-group:last-child { margin-bottom: 0; }
+        .modal-dialog .rag-label { display: block; margin-bottom: 8px; color: #555; font-weight: 500; font-size: 14px; }
+        .modal-dialog .rag-label .req { color: #e74c3c; margin-left: 2px; }
+        .modal-dialog .rag-label .hint { color: var(--text-light); font-weight: normal; font-size: 12px; margin-left: 6px; }
+        .modal-dialog .rag-input,
+        .modal-dialog .rag-select {
+            width: 100%; padding: 11px 14px; border: 1px solid var(--border); border-radius: 10px;
+            font-size: 14px; color: var(--text); background: #fff; outline: none;
+            transition: border-color 0.2s; font-family: inherit;
+        }
+        .modal-dialog .rag-input:focus,
+        .modal-dialog .rag-select:focus { border-color: var(--primary); }
+        .modal-dialog .rag-select { cursor: pointer; appearance: auto; }
+        .modal-dialog .rag-file-zone {
+            position: relative; border: 2px dashed var(--border); border-radius: 12px;
+            padding: 32px 20px; text-align: center; cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+        }
+        .modal-dialog .rag-file-zone:hover,
+        .modal-dialog .rag-file-zone.dragover { border-color: var(--primary); background: rgba(78,110,242,0.04); }
+        .modal-dialog .rag-file-zone input[type="file"] {
+            position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;
+        }
+        .modal-dialog .rag-file-icon { font-size: 40px; margin-bottom: 8px; }
+        .modal-dialog .rag-file-text { color: var(--text-light); font-size: 14px; }
+        .modal-dialog .rag-file-name { margin-top: 8px; color: var(--primary); font-weight: 600; font-size: 14px; word-break: break-all; }
+        .modal-dialog .rag-field-error { color: #e74c3c; font-size: 12px; margin-top: 4px; display: none; }
+        .modal-dialog .rag-btn-upload {
+            width: 100%; padding: 12px; background: var(--primary); color: #fff; border: none;
+            border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer;
+            transition: opacity 0.2s; margin-top: 4px;
+        }
+        .modal-dialog .rag-btn-upload:hover:not(:disabled) { opacity: 0.9; }
+        .modal-dialog .rag-btn-upload:disabled { opacity: 0.5; cursor: not-allowed; }
+        .modal-dialog .rag-progress { display: none; margin-top: 16px; }
+        .modal-dialog .rag-progress-bar { width: 100%; height: 6px; background: var(--border); border-radius: 4px; overflow: hidden; }
+        .modal-dialog .rag-progress-fill { height: 100%; width: 0%; background: var(--primary); transition: width 0.3s; }
+        .modal-dialog .rag-progress-text { text-align: center; margin-top: 6px; color: var(--text-light); font-size: 13px; }
+        .modal-dialog .rag-result { margin-top: 16px; padding: 14px 16px; border-radius: 10px; display: none; font-size: 14px; line-height: 1.7; }
+        .modal-dialog .rag-result.success { display: block; background: #eaf6ee; color: #1e7e34; border: 1px solid #c3e6cb; }
+        .modal-dialog .rag-result.error { display: block; background: #fdeeef; color: #c0392b; border: 1px solid #f5c6cb; }
+        .modal-dialog .rag-result-title { font-weight: 600; margin-bottom: 6px; }
     </style>
 </head>
 <body>
@@ -839,6 +1268,10 @@
         <div class="nav-item active" data-page="chat">
             <span class="icon">💬</span>
             <span>聊天</span>
+        </div>
+        <div class="nav-item" data-page="rag">
+            <span class="icon">📄</span>
+            <span>RAG知识文档</span>
         </div>
         <div class="nav-item" data-page="intro">
             <span class="icon">📋</span>
@@ -975,6 +1408,305 @@
             </div>
         </section>
 
+        <!-- RAG知识文档页 -->
+        <section class="page-section rag-page" id="page-rag">
+            <div class="rag-container">
+                <div class="rag-page-header">
+                    <h2>📚 RAG 知识文档</h2>
+                    <button class="rag-btn-upload-modal" id="ragOpenUploadBtn">+ 上传知识文档</button>
+                </div>
+
+                <!-- 搜索筛选栏 -->
+                <div class="rag-filter-bar">
+                    <input type="text" id="ragSearchInput" class="rag-filter-input" placeholder="搜索文档标题...">
+                    <select id="ragFilterStatus" class="rag-filter-select">
+                        <option value="">全部状态</option>
+                        <option value="INIT">初始化</option>
+                        <option value="UPLOADED">已上传</option>
+                        <option value="CONVERTING">转换中</option>
+                        <option value="CONVERTED">已转换</option>
+                        <option value="CHUNKED">已分块</option>
+                        <option value="VECTOR_STORED">已向量化</option>
+                        <option value="STORED">已存储</option>
+                    </select>
+                    <select id="ragFilterKbType" class="rag-filter-select">
+                        <option value="">全部类型</option>
+                        <option value="DOCUMENT_SEARCH">文档搜索</option>
+                        <option value="DATA_QUERY">数据查询</option>
+                    </select>
+                    <button class="rag-btn-search" id="ragSearchBtn">搜索</button>
+                </div>
+
+                <!-- 工具栏 -->
+                <div class="rag-toolbar">
+                    <div class="rag-toolbar-left">
+                        <button class="rag-btn-batch-delete" id="ragBatchDeleteBtn">批量删除</button>
+                    </div>
+                    <div class="rag-toolbar-right" id="ragTotalCount"></div>
+                </div>
+
+                <!-- 文档列表表格 -->
+                <div class="rag-table-wrapper">
+                    <table class="rag-table">
+                        <thead>
+                            <tr>
+                                <th class="rag-checkbox-cell"><input type="checkbox" id="ragSelectAll"></th>
+                                <th>ID</th>
+                                <th>文档标题</th>
+                                <th>描述</th>
+                                <th>状态</th>
+                                <th>知识库类型</th>
+                                <th>版本</th>
+                                <th>创建时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ragTableBody">
+                            <tr><td colspan="9" class="rag-empty-row">加载中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- 分页 -->
+                <div class="rag-pagination" id="ragPagination">
+                    <button class="rag-page-btn" id="ragPrevPage">上一页</button>
+                    <span class="rag-page-info" id="ragPageInfo">1 / 1</span>
+                    <button class="rag-page-btn" id="ragNextPage">下一页</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- 上传知识文档弹窗 -->
+        <div class="modal-overlay" id="ragUploadModal">
+            <div class="modal-dialog modal-dialog-lg">
+                <div class="modal-header">
+                    <h3>上传知识文档</h3>
+                    <button class="modal-close" id="ragCloseModal">✕</button>
+                </div>
+                <form id="ragUploadForm">
+                    <div class="rag-form-group">
+                        <label class="rag-label">选择文件<span class="req">*</span></label>
+                        <div class="rag-file-zone" id="ragFileZone">
+                            <input type="file" id="ragFile" name="file">
+                            <div class="rag-file-icon">📁</div>
+                            <div class="rag-file-text">点击或拖拽文件到此处</div>
+                            <div class="rag-file-name" id="ragFileName"></div>
+                        </div>
+                    </div>
+
+                    <div class="rag-form-group">
+                        <label class="rag-label" for="ragTitle">文档标题<span class="req">*</span></label>
+                        <input type="text" class="rag-input" id="ragTitle" name="title" placeholder="请输入文档标题">
+                    </div>
+
+                    <div class="rag-form-group">
+                        <label class="rag-label" for="ragDescription">文档描述<span class="req">*</span></label>
+                        <input type="text" class="rag-input" id="ragDescription" name="description" placeholder="请输入文档描述">
+                    </div>
+
+                    <div class="rag-form-group">
+                        <label class="rag-label" for="ragKnowledgeBaseType">知识库类型<span class="req">*</span></label>
+                        <select class="rag-select" id="ragKnowledgeBaseType" name="knowledgeBaseType">
+                            <option value="">请选择知识库类型</option>
+                            <option value="DOCUMENT_SEARCH" selected>文档搜索 (DOCUMENT_SEARCH)</option>
+                            <option value="DATA_QUERY">数据查询 (DATA_QUERY)</option>
+                        </select>
+                    </div>
+
+                    <div class="rag-form-group">
+                        <label class="rag-label" for="ragDocType">知识库<span class="req">*</span></label>
+                        <select class="rag-select" id="ragDocType" name="docType">
+                            <option value="GENERAL" selected>通用知识库 (GENERAL)</option>
+                            <option value="PRODUCT">产品文档库 (PRODUCT)</option>
+                            <option value="TECH">技术文档库 (TECH)</option>
+                        </select>
+                    </div>
+
+                    <div class="rag-form-group" id="ragTableNameGroup" style="display:none;">
+                        <label class="rag-label" for="ragTableName">数据表名称<span class="req">*</span><span class="hint">仅小写字母、数字、下划线</span></label>
+                        <input type="text" class="rag-input" id="ragTableName" name="tableName" placeholder="例如：user_info" pattern="^[a-z0-9_]+$">
+                        <div class="rag-field-error" id="ragTableNameError">只能包含小写字母、数字和下划线</div>
+                    </div>
+
+                    <div class="rag-form-group">
+                        <label class="rag-label" for="ragVersion">版本号<span class="hint">可选，默认 1.0.0</span></label>
+                        <input type="text" class="rag-input" id="ragVersion" name="version" placeholder="1.0.0" value="1.0.0">
+                    </div>
+
+                    <button type="submit" class="rag-btn-upload" id="ragUploadBtn">开始上传</button>
+                </form>
+
+                <div class="rag-progress" id="ragProgress">
+                    <div class="rag-progress-bar"><div class="rag-progress-fill" id="ragProgressFill"></div></div>
+                    <div class="rag-progress-text" id="ragProgressText">0%</div>
+                </div>
+
+                <div class="rag-result" id="ragResult">
+                    <div class="rag-result-title" id="ragResultTitle"></div>
+                    <div id="ragResultContent"></div>
+                </div>
+            </div>
+        </div>
+
+               <!-- 编辑文档弹窗 -->
+        <div class="modal-overlay" id="ragEditModal">
+            <div class="modal-dialog modal-dialog-lg">
+                <div class="modal-header">
+                    <h3>编辑文档</h3>
+                    <button class="modal-close" id="ragEditClose">✕</button>
+                </div>
+                <form id="ragEditForm">
+                    <input type="hidden" id="ragEditDocId">
+                    <div class="rag-form-group">
+                        <label class="rag-label">文档标题<span class="req">*</span></label>
+                        <input type="text" class="rag-input" id="ragEditTitle" placeholder="请输入文档标题">
+                    </div>
+                    <div class="rag-form-group">
+                        <label class="rag-label">文档描述</label>
+                        <input type="text" class="rag-input" id="ragEditDesc" placeholder="请输入文档描述">
+                    </div>
+                </form>
+                <div class="rag-modal-footer">
+                    <button class="rag-modal-btn btn-cancel" id="ragEditCancel">取消</button>
+                    <button class="rag-modal-btn btn-primary" id="ragEditSave">保存</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 分段查看弹窗 -->
+        <div class="modal-overlay" id="ragSegmentModal">
+            <div class="modal-dialog rag-modal-dialog-lg">
+                <div class="modal-header">
+                    <h3>分段列表 <span id="ragSegmentDocTitle" style="font-size:14px;color:#888;"></span></h3>
+                    <button class="modal-close" id="ragSegmentClose">✕</button>
+                </div>
+                <div class="rag-toolbar">
+                    <div class="rag-toolbar-left">
+                        <span id="ragSegmentCount" style="font-size:14px;color:#666;"></span>
+                    </div>
+                    <div class="rag-toolbar-right">
+                        <button class="rag-modal-btn btn-primary" style="font-size:12px;padding:4px 10px;" id="ragSegPrevBtn">上一页</button>
+                        <span class="rag-page-info" id="ragSegPageInfo">1 / 1</span>
+                        <button class="rag-modal-btn btn-primary" style="font-size:12px;padding:4px 10px;" id="ragSegNextBtn">下一页</button>
+                    </div>
+                </div>
+                <div class="rag-segment-list" id="ragSegmentList">
+                    <div style="text-align:center;padding:32px;color:#999;">暂无数据</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 上传新版本弹窗 -->
+        <div class="modal-overlay" id="ragVersionModal">
+            <div class="modal-dialog modal-dialog-lg">
+                <div class="modal-header">
+                    <h3>上传新版本 <span id="ragVersionDocTitle" style="font-size:14px;color:#888;"></span></h3>
+                    <button class="modal-close" id="ragVersionClose">✕</button>
+                </div>
+                <form id="ragVersionForm">
+                    <input type="hidden" id="ragVersionDocId">
+                    <div class="rag-form-group">
+                        <label class="rag-label">新版本号<span class="req">*</span></label>
+                        <input type="text" class="rag-input" id="ragVersionNumber" placeholder="请输入版本号，如 2.0.0" pattern="^\d+\.\d+\.\d+$">
+                    </div>
+                    <div class="rag-form-group">
+                        <label class="rag-label">版本变更说明</label>
+                        <input type="text" class="rag-input" id="ragVersionChangelog" placeholder="可选，描述此版本的变更内容">
+                    </div>
+                    <div class="rag-form-group">
+                        <label class="rag-label">选择文件<span class="req">*</span></label>
+                        <div class="rag-file-zone" id="ragVersionFileZone">
+                            <input type="file" id="ragVersionFile" required>
+                            <div class="rag-file-icon">📁</div>
+                            <div class="rag-file-text">点击或拖拽文件到此处</div>
+                            <div class="rag-file-name" id="ragVersionFileName"></div>
+                        </div>
+                    </div>
+                </form>
+                <div class="rag-modal-footer">
+                    <button class="rag-modal-btn btn-cancel" id="ragVersionCancel">取消</button>
+                    <button class="rag-modal-btn btn-success" id="ragVersionSubmit">上传新版本</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 版本列表弹窗 -->
+        <div class="modal-overlay" id="ragVersionListModal">
+            <div class="modal-dialog rag-modal-dialog-lg">
+                <div class="modal-header">
+                    <h3>版本列表 <span id="ragVersionListTitle" style="font-size:14px;color:#888;"></span></h3>
+                    <button class="modal-close" id="ragVersionListClose">✕</button>
+                </div>
+                <div id="ragVersionListContent">
+                    <div style="text-align:center;padding:32px;color:#999;">暂无数据</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 切片设置弹窗 -->
+        <div class="modal-overlay" id="ragSplitModal">
+            <div class="modal-dialog modal-dialog-lg">
+                <div class="modal-header">
+                    <h3>📄 文档切片设置 <span id="ragSplitDocTitle" style="font-size:14px;color:#888;"></span></h3>
+                    <button class="modal-close" id="ragSplitClose">✕</button>
+                </div>
+                <form id="ragSplitForm">
+                    <input type="hidden" id="ragSplitDocId">
+                    <div class="rag-form-group">
+                        <label class="rag-label">切片方式<span class="req">*</span></label>
+                        <select class="rag-select" id="ragSplitType">
+                            <option value="">请选择切片方式</option>
+                            <option value="LENGTH">按长度切分 (LENGTH)</option>
+                            <option value="TITLE">按标题切分 (TITLE)</option>
+                            <option value="REGEX">按正则切分 (REGEX)</option>
+                            <option value="SMART">智能切分 (SMART)</option>
+                            <option value="SEPARATOR">按分隔符切分 (SEPARATOR)</option>
+                        </select>
+                    </div>
+                    <div class="rag-form-group">
+                        <label class="rag-label">最大分段长度<span class="req">*</span></label>
+                        <input type="number" class="rag-input" id="ragSplitChunkSize" placeholder="例如：500" min="1">
+                        <div class="rag-param-hint">所有切分方式都需要此参数</div>
+                    </div>
+                    <div class="rag-param-group" id="ragSplitOverlapGroup">
+                        <div class="rag-form-group">
+                            <label class="rag-label">分段重叠长度</label>
+                            <input type="number" class="rag-input" id="ragSplitOverlap" placeholder="例如：50" min="0">
+                            <div class="rag-param-hint">按长度切分、按标题切分需要</div>
+                        </div>
+                    </div>
+                    <div class="rag-param-group" id="ragSplitTitleLevelGroup">
+                        <div class="rag-form-group">
+                            <label class="rag-label">标题级数</label>
+                            <input type="number" class="rag-input" id="ragSplitTitleLevel" placeholder="例如：3" min="1" max="6">
+                            <div class="rag-param-hint">按标题切分需要，范围1-6</div>
+                        </div>
+                    </div>
+                    <div class="rag-param-group" id="ragSplitRegexGroup">
+                        <div class="rag-form-group">
+                            <label class="rag-label">正则表达式</label>
+                            <input type="text" class="rag-input" id="ragSplitRegex" placeholder="例如：\n\n+">
+                            <div class="rag-param-hint">按正则切分需要</div>
+                        </div>
+                    </div>
+                    <div class="rag-param-group" id="ragSplitSeparatorGroup">
+                        <div class="rag-form-group">
+                            <label class="rag-label">分隔符</label>
+                            <input type="text" class="rag-input" id="ragSplitSeparator" placeholder="例如：\n\n">
+                            <div class="rag-param-hint">按分隔符切分需要</div>
+                        </div>
+                    </div>
+                </form>
+                <div class="rag-modal-footer">
+                    <button class="rag-modal-btn btn-cancel" id="ragSplitSkip">跳过</button>
+                    <button class="rag-modal-btn btn-primary" id="ragSplitSubmit">开始切片</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- RAG Toast 提示 -->
+        <div class="rag-toast" id="ragToast"></div>
+
     </main>
 </div>
 
@@ -1041,8 +1773,23 @@
             this.classList.add('active');
             document.querySelectorAll('.page-section').forEach(s => s.classList.remove('active'));
             document.getElementById('page-' + page).classList.add('active');
+            // 持久化当前选中的页面，刷新后恢复
+            localStorage.setItem('activePage', page);
         });
     });
+
+    // 刷新后恢复上次选中的页面（而非每次都跳回聊天）
+    const savedPage = localStorage.getItem('activePage');
+    if (savedPage) {
+        const navItem = document.querySelector(`.nav-tabs .nav-item[data-page="${savedPage}"]`);
+        if (navItem) {
+            document.querySelectorAll('.nav-tabs .nav-item').forEach(i => i.classList.remove('active'));
+            navItem.classList.add('active');
+            document.querySelectorAll('.page-section').forEach(s => s.classList.remove('active'));
+            const targetPage = document.getElementById('page-' + savedPage);
+            if (targetPage) targetPage.classList.add('active');
+        }
+    }
 
     // ========== 退出登录 ==========
     document.getElementById('btnLogout').addEventListener('click', function() {
@@ -1794,6 +2541,602 @@
     function removeTyping(el) {
         if (el && el.parentNode) el.parentNode.removeChild(el);
     }
+
+    // ========== RAG 知识文档管理 ==========
+    (function() {
+        // --- 文档列表分页状态 ---
+        let ragCurrentPage = 1;
+        let ragTotalPages = 1;
+        const ragPageSize = 10;
+
+        const ragTableBody = document.getElementById('ragTableBody');
+        const ragPageInfo = document.getElementById('ragPageInfo');
+        const ragPrevPage = document.getElementById('ragPrevPage');
+        const ragNextPage = document.getElementById('ragNextPage');
+        const ragSearchInput = document.getElementById('ragSearchInput');
+        const ragFilterStatus = document.getElementById('ragFilterStatus');
+        const ragFilterKbType = document.getElementById('ragFilterKbType');
+        const ragSearchBtn = document.getElementById('ragSearchBtn');
+
+        // 状态映射
+        const statusMap = {
+            'UPLOADED': { label: '已上传', cls: 'uploaded' },
+            'CONVERTING': { label: '转换中', cls: 'converting' },
+            'CONVERTED': { label: '已转换', cls: 'converted' },
+            'CHUNKED': { label: '已分块', cls: 'chunked' },
+            'VECTOR_STORED': { label: '已向量化', cls: 'vector_stored' },
+            'INIT': { label: '初始化', cls: 'init' }
+        };
+        const kbTypeMap = {
+            'DOCUMENT_SEARCH': { label: '文档搜索', cls: 'document_search' },
+            'DATA_QUERY': { label: '数据查询', cls: 'data_query' }
+        };
+
+        // 格式化时间
+        function formatRagTime(dateStr) {
+            if (!dateStr) return '-';
+            const d = new Date(dateStr);
+            if (isNaN(d)) return String(dateStr);
+            return d.getFullYear() + '-' +
+                String(d.getMonth() + 1).padStart(2, '0') + '-' +
+                String(d.getDate()).padStart(2, '0') + ' ' +
+                String(d.getHours()).padStart(2, '0') + ':' +
+                String(d.getMinutes()).padStart(2, '0');
+        }
+
+        // 选中集合
+        let ragSelectedIds = new Set();
+        let ragDocRecords = []; // 存储当前页文档数据
+
+        // Toast 提示
+        function ragToast(msg, type) {
+            type = type || 'info';
+            const t = document.getElementById('ragToast');
+            t.textContent = msg;
+            t.className = 'rag-toast ' + type + ' show';
+            setTimeout(function() { t.className = 'rag-toast'; }, 2500);
+        }
+        window.ragToast = ragToast;
+
+        // 加载文档列表
+        function loadRagDocuments() {
+            const params = new URLSearchParams();
+            params.set('current', ragCurrentPage);
+            params.set('size', ragPageSize);
+            const title = ragSearchInput.value.trim();
+            const status = ragFilterStatus.value;
+            const kbType = ragFilterKbType.value;
+            if (title) params.set('docTitle', title);
+            if (status) params.set('status', status);
+            if (kbType) params.set('knowledgeBaseType', kbType);
+
+            ragTableBody.innerHTML = '<tr><td colspan="9" class="rag-empty-row">加载中...</td></tr>';
+
+            fetch('/knowledge/document/page?' + params.toString())
+                .then(res => res.json())
+                .then(data => {
+                    if (data.code === 200 && data.data) {
+                        const page = data.data;
+                        const records = page.records || [];
+                        ragTotalPages = page.pages || 1;
+                        ragCurrentPage = page.current || 1;
+                        renderRagTable(records);
+                        renderRagPagination();
+                        document.getElementById('ragTotalCount').textContent = '共 ' + (page.total || 0) + ' 条记录';
+                        ragSelectedIds.clear();
+                        document.getElementById('ragSelectAll').checked = false;
+                    } else {
+                        ragTableBody.innerHTML = '<tr><td colspan="9" class="rag-empty-row">' + escapeHtml(data.msg || '加载失败') + '</td></tr>';
+                    }
+                })
+                .catch(() => {
+                    ragTableBody.innerHTML = '<tr><td colspan="9" class="rag-empty-row">网络错误，请稍后重试</td></tr>';
+                });
+        }
+
+        // 渲染表格
+        function renderRagTable(records) {
+            ragDocRecords = records || [];
+            if (!records || records.length === 0) {
+                ragTableBody.innerHTML = '<tr><td colspan="9" class="rag-empty-row">暂无文档数据</td></tr>';
+                return;
+            }
+            ragTableBody.innerHTML = records.map(function(doc) {
+                const st = statusMap[doc.status] || { label: doc.status || '-', cls: 'init' };
+                const kb = kbTypeMap[doc.knowledgeBaseType] || { label: doc.knowledgeBaseType || '-', cls: 'document_search' };
+                const docId = doc.docId;
+                const viewBtn = kb.cls === 'data_query'
+                    ? '<button class="rag-action-btn btn-view" onclick="ragViewData(' + docId + ')" style="font-size:12px;">查看数据</button>'
+                    : '<button class="rag-action-btn btn-view" onclick="ragViewSegments(' + docId + ')" style="font-size:12px;">查看分段</button>';
+                // DOCUMENT_SEARCH 类型且状态为 CONVERTED 时显示切片按钮
+                var splitBtn = (kb.cls !== 'data_query' && doc.status === 'CONVERTED')
+                    ? '<button class="rag-action-btn btn-split" onclick="openRagSplitModal(' + docId + ')" style="font-size:12px;">切片</button>'
+                    : '';
+                return '<tr>' +
+                    '<td class="rag-checkbox-cell"><input type="checkbox" value="' + docId + '" onchange="ragToggleSelect(' + docId + ')"' + (ragSelectedIds.has(docId) ? ' checked' : '') + '></td>' +
+                    '<td>' + escapeHtml(String(doc.docId ?? '-')) + '</td>' +
+                    '<td class="doc-title-cell" title="' + escapeHtml(doc.docTitle || '') + '">' + escapeHtml(doc.docTitle || '-') + '</td>' +
+                    '<td class="doc-desc-cell" title="' + escapeHtml(doc.description || '') + '">' + escapeHtml(doc.description || '-') + '</td>' +
+                    '<td><span class="rag-status-tag ' + st.cls + '">' + escapeHtml(st.label) + '</span></td>' +
+                    '<td><span class="rag-kb-tag ' + kb.cls + '">' + escapeHtml(kb.label) + '</span></td>' +
+                    '<td id="ragVersionCell-' + docId + '" style="min-width:90px;"><span style="color:#999;font-size:13px;">-</span></td>' +
+                    '<td style="white-space:nowrap;">' + escapeHtml(formatRagTime(doc.createdAt)) + '</td>' +
+                    '<td><div class="rag-action-btns">' +
+                        viewBtn +
+                        splitBtn +
+                        '<button class="rag-action-btn btn-version" onclick="ragOpenVersionModal(' + docId + ')" style="font-size:12px;">上传新版本</button>' +
+                        '<button class="rag-action-btn btn-edit" onclick="ragOpenEditModal(' + docId + ')" style="font-size:12px;">编辑</button>' +
+                        '<button class="rag-action-btn btn-delete" onclick="ragDeleteDocument(' + docId + ')" style="font-size:12px;">删除</button>' +
+                    '</div></td>' +
+                    '</tr>';
+            }).join('');
+        }
+
+        // 渲染分页
+        function renderRagPagination() {
+            ragPageInfo.textContent = ragCurrentPage + ' / ' + ragTotalPages;
+            ragPrevPage.disabled = ragCurrentPage <= 1;
+            ragNextPage.disabled = ragCurrentPage >= ragTotalPages;
+        }
+
+        // 搜索/筛选
+        ragSearchBtn.addEventListener('click', () => { ragCurrentPage = 1; loadRagDocuments(); });
+        ragSearchInput.addEventListener('keydown', e => { if (e.key === 'Enter') { ragCurrentPage = 1; loadRagDocuments(); } });
+        ragFilterStatus.addEventListener('change', () => { ragCurrentPage = 1; loadRagDocuments(); });
+        ragFilterKbType.addEventListener('change', () => { ragCurrentPage = 1; loadRagDocuments(); });
+
+        // 分页按钮
+        ragPrevPage.addEventListener('click', () => { if (ragCurrentPage > 1) { ragCurrentPage--; loadRagDocuments(); } });
+        ragNextPage.addEventListener('click', () => { if (ragCurrentPage < ragTotalPages) { ragCurrentPage++; loadRagDocuments(); } });
+
+        // --- 上传弹窗 ---
+        const ragUploadModal = document.getElementById('ragUploadModal');
+        const ragOpenUploadBtn = document.getElementById('ragOpenUploadBtn');
+        const ragCloseModal = document.getElementById('ragCloseModal');
+
+        function openRagUploadModal() {
+            ragUploadModal.style.display = 'flex';
+            requestAnimationFrame(() => ragUploadModal.classList.add('show'));
+        }
+
+        function closeRagUploadModal() {
+            ragUploadModal.classList.remove('show');
+            setTimeout(() => { ragUploadModal.style.display = 'none'; }, 200);
+        }
+
+        ragOpenUploadBtn.addEventListener('click', openRagUploadModal);
+        ragCloseModal.addEventListener('click', closeRagUploadModal);
+        ragUploadModal.addEventListener('click', e => { if (e.target === ragUploadModal) closeRagUploadModal(); });
+
+        // --- 上传逻辑 ---
+        const ragForm = document.getElementById('ragUploadForm');
+        const ragFileInput = document.getElementById('ragFile');
+        const ragFileName = document.getElementById('ragFileName');
+        const ragFileZone = document.getElementById('ragFileZone');
+        const ragKbTypeSelect = document.getElementById('ragKnowledgeBaseType');
+        const ragTableNameGroup = document.getElementById('ragTableNameGroup');
+        const ragTableNameInput = document.getElementById('ragTableName');
+        const ragTableNameError = document.getElementById('ragTableNameError');
+        const ragUploadBtn = document.getElementById('ragUploadBtn');
+        const ragProgress = document.getElementById('ragProgress');
+        const ragProgressFill = document.getElementById('ragProgressFill');
+        const ragProgressText = document.getElementById('ragProgressText');
+        const ragResult = document.getElementById('ragResult');
+        const ragResultTitle = document.getElementById('ragResultTitle');
+        const ragResultContent = document.getElementById('ragResultContent');
+
+        // 选择文件后自动用文件名填充标题和描述
+        function ragFillFromName(file) {
+            ragFileName.textContent = file.name;
+            const lastDot = file.name.lastIndexOf('.');
+            const baseName = lastDot > 0 ? file.name.substring(0, lastDot) : file.name;
+            const titleInput = document.getElementById('ragTitle');
+            const descInput = document.getElementById('ragDescription');
+            if (!titleInput.value.trim()) titleInput.value = baseName;
+            if (!descInput.value.trim()) descInput.value = baseName;
+        }
+
+        ragFileInput.addEventListener('change', function() {
+            if (this.files && this.files[0]) ragFillFromName(this.files[0]);
+        });
+
+        // 拖拽上传
+        ragFileZone.addEventListener('dragover', e => { e.preventDefault(); ragFileZone.classList.add('dragover'); });
+        ragFileZone.addEventListener('dragleave', () => ragFileZone.classList.remove('dragover'));
+        ragFileZone.addEventListener('drop', e => {
+            e.preventDefault();
+            ragFileZone.classList.remove('dragover');
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                ragFileInput.files = e.dataTransfer.files;
+                ragFillFromName(e.dataTransfer.files[0]);
+            }
+        });
+
+        // 知识库类型切换：数据查询时显示数据表名称
+        ragKbTypeSelect.addEventListener('change', function() {
+            if (this.value === 'DATA_QUERY') {
+                ragTableNameGroup.style.display = 'block';
+                ragTableNameInput.required = true;
+            } else {
+                ragTableNameGroup.style.display = 'none';
+                ragTableNameInput.required = false;
+                ragTableNameInput.value = '';
+                ragTableNameError.style.display = 'none';
+                ragTableNameInput.style.borderColor = '';
+            }
+        });
+
+        // 数据表名称输入校验
+        ragTableNameInput.addEventListener('input', function() {
+            if (this.value && !/^[a-z0-9_]*$/.test(this.value)) {
+                ragTableNameError.style.display = 'block';
+                this.style.borderColor = '#e74c3c';
+            } else {
+                ragTableNameError.style.display = 'none';
+                this.style.borderColor = '';
+            }
+        });
+
+        function ragShowResult(type, title, content = '') {
+            ragResult.className = 'rag-result ' + type;
+            ragResultTitle.textContent = title;
+            ragResultContent.innerHTML = content;
+        }
+
+        // 表单提交：构建 FormData 并以 XHR 上传（带进度）
+        ragForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const file = ragFileInput.files[0];
+            if (!file) { ragShowResult('error', '请选择要上传的文件'); return; }
+
+            const title = document.getElementById('ragTitle').value.trim();
+            const description = document.getElementById('ragDescription').value.trim();
+            const knowledgeBaseType = ragKbTypeSelect.value;
+            const docType = document.getElementById('ragDocType').value;
+            const version = document.getElementById('ragVersion').value.trim() || '1.0.0';
+
+            if (!title) { ragShowResult('error', '请输入文档标题'); return; }
+            if (!description) { ragShowResult('error', '请输入文档描述'); return; }
+            if (!knowledgeBaseType) { ragShowResult('error', '请选择知识库类型'); return; }
+
+            // DATA_QUERY 类型需校验数据表名称
+            let tableName = '';
+            if (knowledgeBaseType === 'DATA_QUERY') {
+                tableName = ragTableNameInput.value.trim();
+                if (!tableName) { ragShowResult('error', '请输入数据表名称'); ragTableNameInput.focus(); return; }
+                if (!/^[a-z0-9_]+$/.test(tableName)) {
+                    ragShowResult('error', '数据表名称格式错误', '只能包含小写字母、数字和下划线');
+                    ragTableNameInput.focus(); return;
+                }
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('title', title);
+            formData.append('description', description);
+            formData.append('knowledgeBaseType', knowledgeBaseType);
+            if (docType) formData.append('docType', docType);
+            if (tableName) formData.append('tableName', tableName);
+            formData.append('version', version);
+
+            // 重置 UI 状态
+            ragResult.className = 'rag-result';
+            ragProgress.style.display = 'block';
+            ragProgressFill.style.width = '0%';
+            ragProgressText.textContent = '0%';
+            ragUploadBtn.disabled = true;
+            ragUploadBtn.textContent = '上传中...';
+
+            const xhr = new XMLHttpRequest();
+            xhr.upload.addEventListener('progress', e => {
+                if (e.lengthComputable) {
+                    const percent = Math.round((e.loaded / e.total) * 100);
+                    ragProgressFill.style.width = percent + '%';
+                    ragProgressText.textContent = percent + '%';
+                }
+            });
+            xhr.addEventListener('load', () => {
+                ragProgress.style.display = 'none';
+                ragUploadBtn.disabled = false;
+                ragUploadBtn.textContent = '开始上传';
+                // 统一解析 R 响应：{code,msg,data}
+                let resp = null;
+                try { resp = xhr.responseText ? JSON.parse(xhr.responseText) : null; } catch (e) {}
+                // 业务失败：code 非 200（业务异常/参数非法等统一返回 R.fail）
+                if (resp && resp.code !== 200) {
+                    ragShowResult('error', '上传失败', escapeHtml(resp.msg || ('错误码：' + resp.code)));
+                    return;
+                }
+                // 成功：code === 200，业务数据在 data 字段
+                if (xhr.status === 200 && resp && resp.code === 200) {
+                    const doc = resp.data || {};
+                    ragShowResult('success', '上传成功！',
+                        '<strong>文档ID：</strong>' + escapeHtml(String(doc.docId ?? '-')) + '<br>' +
+                        '<strong>文档标题：</strong>' + escapeHtml(String(doc.docTitle ?? '-')) + '<br>' +
+                        '<strong>版本号：</strong>' + escapeHtml(String(doc.version ?? version)) + '<br>' +
+                        '<strong>状态：</strong>' + escapeHtml(String(doc.status ?? '-')));
+                    ragForm.reset();
+                    ragFileName.textContent = '';
+                    document.getElementById('ragVersion').value = '1.0.0';
+                    ragTableNameGroup.style.display = 'none';
+                    // 上传成功后关闭弹窗并刷新列表
+                    setTimeout(() => {
+                        closeRagUploadModal();
+                        // DOCUMENT_SEARCH 类型文档上传成功后弹出切片设置弹窗
+                        if (doc.knowledgeBaseType === 'DOCUMENT_SEARCH') {
+                            // 临时将上传的文档添加到记录中，以便弹窗能获取标题
+                            ragDocRecords.unshift(doc);
+                            openRagSplitModal(doc.docId);
+                            // 异步刷新列表
+                            loadRagDocuments();
+                        } else {
+                            // DATA_QUERY 类型无需切片
+                            ragToast('DATA_QUERY 类型文档无需切片，数据已存储', 'info');
+                            loadRagDocuments();
+                        }
+                    }, 1500);
+                } else {
+                    // 非 200 且非标准 R 结构，回退展示原始响应
+                    let msg = '服务器返回错误：' + xhr.status;
+                    if (resp && resp.msg) msg = resp.msg;
+                    else { try { const t = xhr.responseText.trim(); if (t) msg = t; } catch (e) {} }
+                    ragShowResult('error', '上传失败', escapeHtml(msg));
+                }
+            });
+            xhr.addEventListener('error', () => {
+                ragProgress.style.display = 'none';
+                ragUploadBtn.disabled = false;
+                ragUploadBtn.textContent = '开始上传';
+                ragShowResult('error', '上传失败', '网络请求出错，请检查网络连接');
+            });
+
+            xhr.open('POST', '/knowledge/document/upload');
+            xhr.send(formData);
+        });
+
+        // ========== 复选框选择 ==========
+        window.ragToggleSelect = function(id) {
+            if (ragSelectedIds.has(id)) ragSelectedIds.delete(id);
+            else ragSelectedIds.add(id);
+            const checkboxes = document.querySelectorAll('#ragTableBody input[type=checkbox]');
+            document.getElementById('ragSelectAll').checked = [...checkboxes].every(function(cb) { return cb.checked; });
+        };
+
+        document.getElementById('ragSelectAll').addEventListener('click', function() {
+            const checked = this.checked;
+            document.querySelectorAll('#ragTableBody input[type=checkbox]').forEach(function(cb) {
+                cb.checked = checked;
+                const id = parseInt(cb.value);
+                if (checked) ragSelectedIds.add(id); else ragSelectedIds.delete(id);
+            });
+        });
+
+        // ========== 批量删除 ==========
+        document.getElementById('ragBatchDeleteBtn').addEventListener('click', function() {
+            if (ragSelectedIds.size === 0) { ragToast('请先选择要删除的文档', 'warning'); return; }
+            showConfirm('确认删除选中的 ' + ragSelectedIds.size + ' 个文档？删除后将同时删除其下所有分段。', '批量删除').then(function(ok) {
+                if (!ok) return;
+                ragToast('删除接口开发中，暂不可用', 'info');
+            });
+        });
+
+        // ========== 删除文档 ==========
+        window.ragDeleteDocument = function(docId) {
+            showConfirm('确认删除该文档？删除后将同时删除其下所有分段。', '删除文档').then(function(ok) {
+                if (!ok) return;
+                ragToast('删除接口开发中，暂不可用', 'info');
+            });
+        };
+
+        // ========== 编辑文档 ==========
+        window.ragOpenEditModal = function(docId) {
+            const doc = ragDocRecords.find(function(d) { return d.docId === docId; });
+            if (!doc) { ragToast('未找到文档数据', 'error'); return; }
+            document.getElementById('ragEditDocId').value = docId;
+            document.getElementById('ragEditTitle').value = doc.docTitle || '';
+            document.getElementById('ragEditDesc').value = doc.description || '';
+            document.getElementById('ragEditModal').style.display = 'flex';
+            requestAnimationFrame(function() { document.getElementById('ragEditModal').classList.add('show'); });
+        };
+
+        function closeRagEditModal() {
+            document.getElementById('ragEditModal').classList.remove('show');
+            setTimeout(function() { document.getElementById('ragEditModal').style.display = 'none'; }, 200);
+        }
+        document.getElementById('ragEditClose').addEventListener('click', closeRagEditModal);
+        document.getElementById('ragEditCancel').addEventListener('click', closeRagEditModal);
+        document.getElementById('ragEditModal').addEventListener('click', function(e) { if (e.target === this) closeRagEditModal(); });
+        document.getElementById('ragEditSave').addEventListener('click', function() {
+            ragToast('编辑接口开发中，暂不可用', 'info');
+            closeRagEditModal();
+        });
+
+        // ========== 查看分段 ==========
+        window.ragViewSegments = function(docId) {
+            const doc = ragDocRecords.find(function(d) { return d.docId === docId; });
+            const docTitle = doc ? (doc.docTitle || '') : '';
+            document.getElementById('ragSegmentDocTitle').textContent = '- ' + docTitle;
+            document.getElementById('ragSegmentCount').textContent = '';
+            document.getElementById('ragSegmentList').innerHTML = '<div style="text-align:center;padding:32px;color:#999;">分段接口开发中，暂不可用</div>';
+            document.getElementById('ragSegmentModal').style.display = 'flex';
+            requestAnimationFrame(function() { document.getElementById('ragSegmentModal').classList.add('show'); });
+        };
+
+        function closeRagSegmentModal() {
+            document.getElementById('ragSegmentModal').classList.remove('show');
+            setTimeout(function() { document.getElementById('ragSegmentModal').style.display = 'none'; }, 200);
+        }
+        document.getElementById('ragSegmentClose').addEventListener('click', closeRagSegmentModal);
+        document.getElementById('ragSegmentModal').addEventListener('click', function(e) { if (e.target === this) closeRagSegmentModal(); });
+
+        // ========== 查看数据（DATA_QUERY 类型） ==========
+        window.ragViewData = function(docId) {
+            ragToast('数据预览接口开发中，暂不可用', 'info');
+        };
+
+        // ========== 上传新版本 ==========
+        window.ragOpenVersionModal = function(docId) {
+            const doc = ragDocRecords.find(function(d) { return d.docId === docId; });
+            const docTitle = doc ? (doc.docTitle || '') : '';
+            document.getElementById('ragVersionDocTitle').textContent = '- ' + docTitle;
+            document.getElementById('ragVersionDocId').value = docId;
+            document.getElementById('ragVersionNumber').value = '';
+            document.getElementById('ragVersionChangelog').value = '';
+            document.getElementById('ragVersionFile').value = '';
+            document.getElementById('ragVersionFileName').textContent = '';
+            document.getElementById('ragVersionModal').style.display = 'flex';
+            requestAnimationFrame(function() { document.getElementById('ragVersionModal').classList.add('show'); });
+        };
+
+        function closeRagVersionModal() {
+            document.getElementById('ragVersionModal').classList.remove('show');
+            setTimeout(function() { document.getElementById('ragVersionModal').style.display = 'none'; }, 200);
+        }
+        document.getElementById('ragVersionClose').addEventListener('click', closeRagVersionModal);
+        document.getElementById('ragVersionCancel').addEventListener('click', closeRagVersionModal);
+        document.getElementById('ragVersionModal').addEventListener('click', function(e) { if (e.target === this) closeRagVersionModal(); });
+
+        // 版本文件选择显示文件名
+        document.getElementById('ragVersionFile').addEventListener('change', function() {
+            if (this.files && this.files[0]) {
+                document.getElementById('ragVersionFileName').textContent = this.files[0].name;
+            }
+        });
+
+        // 拖拽上传
+        const ragVersionFileZone = document.getElementById('ragVersionFileZone');
+        ragVersionFileZone.addEventListener('dragover', function(e) { e.preventDefault(); ragVersionFileZone.classList.add('dragover'); });
+        ragVersionFileZone.addEventListener('dragleave', function() { ragVersionFileZone.classList.remove('dragover'); });
+        ragVersionFileZone.addEventListener('drop', function(e) {
+            e.preventDefault();
+            ragVersionFileZone.classList.remove('dragover');
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                document.getElementById('ragVersionFile').files = e.dataTransfer.files;
+                document.getElementById('ragVersionFileName').textContent = e.dataTransfer.files[0].name;
+            }
+        });
+
+        document.getElementById('ragVersionSubmit').addEventListener('click', function() {
+            const version = document.getElementById('ragVersionNumber').value.trim();
+            const fileInput = document.getElementById('ragVersionFile');
+            const docId = document.getElementById('ragVersionDocId').value;
+            const changelog = document.getElementById('ragVersionChangelog').value.trim();
+            if (!version || !/^\d+\.\d+\.\d+$/.test(version)) { ragToast('请输入有效的版本号（如 2.0.0）', 'warning'); return; }
+            if (!fileInput.files || !fileInput.files[0]) { ragToast('请选择文件', 'warning'); return; }
+
+            const btn = document.getElementById('ragVersionSubmit');
+            btn.disabled = true;
+            btn.textContent = '上传中...';
+
+            var formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('docId', docId);
+            formData.append('version', version);
+            if (changelog) formData.append('changelog', changelog);
+
+            fetch('/knowledge/document/upload-version', {
+                method: 'POST',
+                body: formData
+            })
+            .then(function(res) { return res.json(); })
+            .then(function(resp) {
+                btn.disabled = false;
+                btn.textContent = '上传新版本';
+                if (resp.code === 200 && resp.data) {
+                    var doc = resp.data;
+                    ragToast('新版本 v' + version + ' 上传成功', 'success');
+                    closeRagVersionModal();
+                    // 刷新文档列表
+                    loadRagDocuments();
+                    // DOCUMENT_SEARCH 类型文档上传新版本后弹出切片设置弹窗
+                    if (doc.knowledgeBaseType === 'DOCUMENT_SEARCH') {
+                        ragDocRecords.unshift(doc);
+                        setTimeout(function() {
+                            openRagSplitModal(doc.docId);
+                        }, 300);
+                    }
+                } else {
+                    ragToast(resp.msg || '上传失败', 'error');
+                }
+            })
+            .catch(function(err) {
+                btn.disabled = false;
+                btn.textContent = '上传新版本';
+                ragToast('上传失败: ' + err.message, 'error');
+            });
+        });
+
+        // ========== 版本列表 ==========
+        function openRagVersionListModal(docId) {
+            const doc = ragDocRecords.find(function(d) { return d.docId === docId; });
+            const docTitle = doc ? (doc.docTitle || '') : '';
+            document.getElementById('ragVersionListTitle').textContent = '- ' + docTitle;
+            document.getElementById('ragVersionListContent').innerHTML = '<div style="text-align:center;padding:32px;color:#999;">版本列表接口开发中，暂不可用</div>';
+            document.getElementById('ragVersionListModal').style.display = 'flex';
+            requestAnimationFrame(function() { document.getElementById('ragVersionListModal').classList.add('show'); });
+        }
+        window.openRagVersionListModal = openRagVersionListModal;
+
+        function closeRagVersionListModal() {
+            document.getElementById('ragVersionListModal').classList.remove('show');
+            setTimeout(function() { document.getElementById('ragVersionListModal').style.display = 'none'; }, 200);
+        }
+        document.getElementById('ragVersionListClose').addEventListener('click', closeRagVersionListModal);
+        document.getElementById('ragVersionListModal').addEventListener('click', function(e) { if (e.target === this) closeRagVersionListModal(); });
+
+        // ========== 切片设置 ==========
+        function openRagSplitModal(docId) {
+            const doc = ragDocRecords.find(function(d) { return d.docId === docId; });
+            const docTitle = doc ? (doc.docTitle || '') : '';
+            document.getElementById('ragSplitDocTitle').textContent = '- ' + docTitle;
+            document.getElementById('ragSplitDocId').value = docId;
+            document.getElementById('ragSplitForm').reset();
+            ['ragSplitOverlapGroup', 'ragSplitTitleLevelGroup', 'ragSplitRegexGroup', 'ragSplitSeparatorGroup']
+                .forEach(function(id) { document.getElementById(id).classList.remove('show'); });
+            document.getElementById('ragSplitModal').style.display = 'flex';
+            requestAnimationFrame(function() { document.getElementById('ragSplitModal').classList.add('show'); });
+        }
+        window.openRagSplitModal = openRagSplitModal;
+
+        function closeRagSplitModal() {
+            document.getElementById('ragSplitModal').classList.remove('show');
+            setTimeout(function() { document.getElementById('ragSplitModal').style.display = 'none'; }, 200);
+        }
+        document.getElementById('ragSplitClose').addEventListener('click', closeRagSplitModal);
+        document.getElementById('ragSplitSkip').addEventListener('click', function() { closeRagSplitModal(); });
+        document.getElementById('ragSplitModal').addEventListener('click', function(e) { if (e.target === this) closeRagSplitModal(); });
+
+        // 切片方式切换时显示/隐藏参数组
+        document.getElementById('ragSplitType').addEventListener('change', function() {
+            const splitType = this.value;
+            ['ragSplitOverlapGroup', 'ragSplitTitleLevelGroup', 'ragSplitRegexGroup', 'ragSplitSeparatorGroup']
+                .forEach(function(id) { document.getElementById(id).classList.remove('show'); });
+            if (splitType === 'LENGTH' || splitType === 'TITLE') {
+                document.getElementById('ragSplitOverlapGroup').classList.add('show');
+            }
+            if (splitType === 'TITLE') {
+                document.getElementById('ragSplitTitleLevelGroup').classList.add('show');
+            }
+            if (splitType === 'REGEX') {
+                document.getElementById('ragSplitRegexGroup').classList.add('show');
+            }
+            if (splitType === 'SEPARATOR') {
+                document.getElementById('ragSplitSeparatorGroup').classList.add('show');
+            }
+        });
+
+        document.getElementById('ragSplitSubmit').addEventListener('click', function() {
+            const splitType = document.getElementById('ragSplitType').value;
+            const chunkSize = document.getElementById('ragSplitChunkSize').value;
+            if (!splitType) { ragToast('请选择切片方式', 'warning'); return; }
+            if (!chunkSize || chunkSize < 1) { ragToast('请输入有效的最大分段长度', 'warning'); return; }
+            ragToast('切片接口开发中，暂不可用', 'info');
+            closeRagSplitModal();
+        });
+
+        // 初始加载文档列表
+        loadRagDocuments();
+    })();
 </script>
 </body>
 </html>
