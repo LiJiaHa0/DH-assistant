@@ -16,6 +16,7 @@ import org.springframework.ai.mcp.SyncMcpToolCallbackProvider;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -37,6 +38,7 @@ import java.util.List;
 public class AgentChatController implements InitializingBean {
 
     @Autowired
+    @Qualifier("dashScopeChatModel")
     private ChatModel chatModel;
 
     @Autowired
@@ -77,7 +79,7 @@ public class AgentChatController implements InitializingBean {
      * @param chatConversationService     会话服务
      * @param taskManager        任务管理器
      */
-    public AgentChatController(ChatModel chatModel,
+    public AgentChatController(@Qualifier("dashScopeChatModel") ChatModel chatModel,
                            ChatConversationService chatConversationService,
                            AgentTaskManager taskManager) {
         // 设置聊天模型

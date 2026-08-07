@@ -69,4 +69,24 @@ public interface TableMetaMapper extends BaseMapper<TableMeta> {
      */
     @Delete("DELETE FROM table_meta WHERE table_name = #{tableName}")
     void physicalDeleteByTableName(@Param("tableName") String tableName);
+
+    /**
+     * 统计动态表数据总条数
+     *
+     * @param tableName 物理表名（已包含 dh_data_query_ 前缀）
+     * @return 数据总条数
+     */
+    @Select("SELECT COUNT(*) FROM `${tableName}`")
+    long countTableData(@Param("tableName") String tableName);
+
+    /**
+     * 分页查询动态表数据
+     *
+     * @param tableName 物理表名（已包含 dh_data_query_ 前缀）
+     * @param offset    偏移量
+     * @param size      每页条数
+     * @return 数据列表
+     */
+    @Select("SELECT * FROM `${tableName}` LIMIT #{offset}, #{size}")
+    List<Map<String, Object>> queryTableData(@Param("tableName") String tableName, @Param("offset") int offset, @Param("size") int size);
 }

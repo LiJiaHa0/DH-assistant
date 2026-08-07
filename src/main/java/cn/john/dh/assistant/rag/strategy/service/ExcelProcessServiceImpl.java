@@ -1,14 +1,18 @@
 package cn.john.dh.assistant.rag.strategy.service;
 
 import cn.john.dh.assistant.rag.domain.entity.KnowledgeDocument;
+import cn.john.dh.assistant.rag.domain.entity.TableMeta;
 import cn.john.dh.assistant.rag.domain.enums.FileType;
 import cn.john.dh.assistant.rag.domain.enums.KnowledgeBaseType;
 import cn.john.dh.assistant.rag.mapper.TableMetaMapper;
 import cn.john.dh.assistant.rag.strategy.FileProcessService;
+import cn.john.dh.assistant.utils.BusinessExceptionUtils;
 import com.alibaba.druid.sql.transform.TableMapping;
 import com.alibaba.excel.EasyExcel;
 import com.alibaba.excel.context.AnalysisContext;
 import com.alibaba.excel.read.listener.ReadListener;
+import com.alibaba.fastjson2.JSON;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.formula.functions.T;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,8 +20,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.Assert;
 
+import java.io.IOException;
 import java.io.InputStream;
+import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * @Author John
@@ -33,13 +40,19 @@ public class ExcelProcessServiceImpl implements FileProcessService {
     @Autowired
     private TableMetaMapper tableMetaMapper;
 
+    /**
+     * 处理excel文档
+     * @param document
+     * @param inputStream
+     * @return
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public String processDocument(KnowledgeDocument document, InputStream inputStream) {
         String documentTitle = document.getDocTitle();
         String originalTableName = document.getTableName();
         Long versionId = document.getCurrentVersionId();
-        Assert.notNull(versionId, "文档当前版本ID不能为空");
+        BusinessExceptionUtils.throwBusinessException(Objects.isNull(versionId), "文档当前版本ID不能为空");
         log.info("开始处理Excel文件: {}, versionId={}", documentTitle, versionId);
         try {
             // 解析Excel文件
@@ -58,10 +71,232 @@ public class ExcelProcessServiceImpl implements FileProcessService {
             List<ColumnInfo> columns = generateColumnInfo(headers);
             //判断表是否已存在
             boolean tableExists = tableMetaMapper.checkTableExists(tableName) > 0;
+            if (tableExists) {
+                ifTableExists(tableName, excelData, columns, document);
+            }else{
+                ifTableNotExists(tableName, excelData, columns, document);
+            }
         } catch (Exception e) {
-            log.error("处理Excel文件时出错: {}, versionId={}", documentTitle, versionId, e);
+            throw new RuntimeException(e);
+        } finally {
+            if (inputStream != null) {
+                try {
+                    inputStream.close();
+                } catch (Exception ignored) {
+                    // 忽略关闭异常
+                }
+            }
         }
-        return "";
+        return null;
+    }
+
+    /**
+     * 如果表存在相关逻辑
+     * @param tableName
+     * @param excelData
+     * @param columns
+     * @param document
+     */
+    private void ifTableExists(String tableName, List<List<String>> excelData, List<ColumnInfo> columns, KnowledgeDocument document) {
+        //已存在：校验表结构必须与之前完全一致，否则禁止上传
+        TableMeta existingMeta = tableMetaMapper.selectOne(
+                new LambdaQueryWrapper<TableMeta>()
+                        .eq(TableMeta::getTableName, tableName));
+        BusinessExceptionUtils.throwBusinessException(Objects.isNull(existingMeta),"表 " + tableName + " 的元数据不存在");
+        // 解析已存在的表结构
+        List<ColumnInfo> existingColumns = parseColumnInfo(existingMeta.getColumnsInfo());
+        BusinessExceptionUtils.throwBusinessException(!isSchemaCompatible(existingColumns, columns), "Excel 表结构与已有表 " + tableName + " 不一致，禁止上传。请保持表头、列名、顺序及类型完全一致。");
+        log.info("表 {} 已存在且结构一致，执行数据替换", tableName);
+        // 删除现有表数据
+        tableMetaMapper.physicalDeleteByTableName(tableName);
+        log.info("表 {} 旧数据已清空", tableName);
+        // 截取除表头以外的数据行
+        List<List<String>> dataRows = excelData.subList(1, excelData.size());
+        int insertedCount = insertData(tableName, columns, dataRows);
+        log.info("表 {} 数据替换完成，新数据 {} 行", tableName, insertedCount);
+        //更新元数据中的版本绑定为当前版本
+        existingMeta.setVersionId(document.getCurrentVersionId());
+        existingMeta.setDescription(document.getDescription() != null ? document.getDescription() : "从Excel导入: " + document.getDocTitle());
+        existingMeta.setUpdatedAt(LocalDateTime.now());
+        boolean updateResult = tableMetaMapper.updateById(existingMeta) > 0;
+        BusinessExceptionUtils.throwBusinessException(!updateResult, "表元数据更新失败");
+    }
+
+    /**
+     * 如果表不存在相关逻辑
+     * @param tableName
+     * @param excelData
+     * @param columns
+     * @param document
+     */
+    private void ifTableNotExists(String tableName, List<List<String>> excelData, List<ColumnInfo> columns, KnowledgeDocument document) {
+        //表不存在：新建表并导数据
+        String createTableSql = generateCreateTableSql(tableName, document.getDescription(), columns);
+        log.info("生成建表SQL: {}", createTableSql);
+        tableMetaMapper.executeCreateTable(createTableSql);
+        log.info("表 {} 创建成功", tableName);
+        List<List<String>> dataRows = excelData.subList(1, excelData.size());
+        int insertedCount = insertData(tableName, columns, dataRows);
+        log.info("插入数据 {} 行", insertedCount);
+        TableMeta tableMeta = new TableMeta();
+        tableMeta.setTableName(tableName);
+        tableMeta.setDescription(document.getDescription() != null ? document.getDescription() : "从Excel导入: " + document.getDocTitle());
+        tableMeta.setCreateSql(createTableSql);
+        tableMeta.setColumnsInfo(JSON.toJSONString(columns));
+        tableMeta.setVersionId(document.getCurrentVersionId());
+        tableMeta.setCreatedAt(LocalDateTime.now());
+        tableMeta.setUpdatedAt(LocalDateTime.now());
+        int result = tableMetaMapper.insert(tableMeta);
+        Assert.isTrue(result == 1, "表元数据保存失败");
+        log.info("表元数据保存成功, ID: {}", tableMeta.getId());
+
+    }
+
+    /**
+     * 生成建表SQL
+     */
+    private String generateCreateTableSql(String tableName, String description, List<ColumnInfo> columns) {
+        StringBuilder sql = new StringBuilder();
+        sql.append("CREATE TABLE IF NOT EXISTS `").append(tableName).append("` (\n");
+
+        // 添加自增主键
+        sql.append("  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',\n");
+
+        // 添加Excel列
+        for (ColumnInfo column : columns) {
+            sql.append("  `").append(column.getColumnName()).append("` ")
+                    .append(column.getDataType())
+                    .append(" DEFAULT NULL COMMENT '")
+                    .append(escapeSqlComment(column.getOriginalHeader()))
+                    .append("',\n");
+        }
+
+        // 添加创建时间和更新时间
+        sql.append("  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n");
+        sql.append("  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',\n");
+
+        // 设置主键
+        sql.append("  PRIMARY KEY (`id`)\n");
+        sql.append(") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='" + description + "'");
+
+        return sql.toString();
+    }
+
+    /**
+     * 插入数据
+     * @param tableName
+     * @param columns
+     * @param dataRows
+     * @return
+     */
+    private int insertData(String tableName, List<ColumnInfo> columns, List<List<String>> dataRows) {
+        int batchSize = 500; // 每批插入500条
+        int totalInserted = 0;
+        for (int i = 0; i < dataRows.size(); i += batchSize) {
+            List<List<String>> batch = dataRows.subList(i, Math.min(i + batchSize, dataRows.size()));
+            String insertSql = generateBatchInsertSql(tableName, columns, batch);
+            // 使用 JdbcTemplate 执行，绕过 MyBatis-Plus 的BlockAttackInnerInterceptor拦截器
+            tableMetaMapper.executeInsert(insertSql);
+            totalInserted += batch.size();
+        }
+        return totalInserted;
+    }
+
+    /**
+     * 生成批量插入SQL
+     */
+    private String generateBatchInsertSql(String tableName, List<ColumnInfo> columns, List<List<String>> rows) {
+        StringBuilder sql = new StringBuilder();
+        sql.append("INSERT INTO `").append(tableName).append("` (");
+        // 列名
+        String columnNames = columns.stream()
+                .map(c -> "`" + c.getColumnName() + "`")
+                .collect(Collectors.joining(", "));
+        sql.append(columnNames).append(") VALUES ");
+        // 值
+        for (int i = 0; i < rows.size(); i++) {
+            List<String> row = rows.get(i);
+            if (i > 0) {
+                sql.append(", ");
+            }
+            sql.append("(");
+            for (int j = 0; j < columns.size(); j++) {
+                if (j > 0) {
+                    sql.append(", ");
+                }
+                String value = j < row.size() ? row.get(j) : "";
+                sql.append(escapeSqlValue(value));
+            }
+            sql.append(")");
+        }
+        return sql.toString();
+    }
+
+    /**
+     * 转义SQL值
+     */
+    private String escapeSqlValue(String value) {
+        if (value == null || value.isEmpty()) {
+            return "NULL";
+        }
+        // 转义单引号
+        String escaped = value.replace("'", "''");
+        // 处理换行符和制表符
+        escaped = escaped.replace("\\", "\\\\");
+        escaped = escaped.replace("\n", "\\n");
+        escaped = escaped.replace("\r", "\\r");
+        escaped = escaped.replace("\t", "\\t");
+        return "'" + escaped + "'";
+    }
+
+    /**
+     * 转义SQL注释中的特殊字符
+     */
+    private String escapeSqlComment(String comment) {
+        if (comment == null) {
+            return "";
+        }
+        return comment.replace("'", "\\'").replace("\\", "\\\\");
+    }
+
+    /**
+     * 判断两次上传的表结构是否一致
+     * <p>
+     * 要求：列数量、列名、数据类型、顺序完全一致
+     */
+    private boolean isSchemaCompatible(List<ColumnInfo> existingColumns, List<ColumnInfo> newColumns) {
+        if (existingColumns == null || newColumns == null) {
+            return existingColumns == newColumns;
+        }
+        if (existingColumns.size() != newColumns.size()) {
+            return false;
+        }
+        for (int i = 0; i < existingColumns.size(); i++) {
+            ColumnInfo a = existingColumns.get(i);
+            ColumnInfo b = newColumns.get(i);
+            if (a == null || b == null) {
+                return false;
+            }
+            if (!Objects.equals(a.getColumnName(), b.getColumnName())) {
+                return false;
+            }
+            if (!Objects.equals(a.getDataType(), b.getDataType())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 转换列信息
+     * @param columnsInfoJson
+     * @return
+     */
+    private List<ColumnInfo> parseColumnInfo(String columnsInfoJson) {
+        if (columnsInfoJson == null || columnsInfoJson.isBlank()) {
+            return Collections.emptyList();
+        }
+        return JSON.parseArray(columnsInfoJson, ColumnInfo.class);
     }
 
     /**
@@ -87,7 +322,8 @@ public class ExcelProcessServiceImpl implements FileProcessService {
             column.setIndex(i);
             column.setOriginalHeader(header);
             column.setColumnName(columnName);
-            column.setDataType("VARCHAR(500)"); // 默认使用VARCHAR类型
+            // 使用TEXT类型，数据存储在页外，行内仅保留指针，避免列数过多时超出MySQL行大小限制65535字节
+            column.setDataType("TEXT");
             columns.add(column);
         }
 

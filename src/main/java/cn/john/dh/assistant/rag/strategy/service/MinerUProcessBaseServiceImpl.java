@@ -20,6 +20,7 @@ import org.apache.hc.core5.http.HttpEntity;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.core5.util.Timeout;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
@@ -28,6 +29,9 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.content.Media;
+import org.springframework.ai.ollama.OllamaChatModel;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.util.MimeType;
 import org.springframework.util.MimeTypeUtils;
 
 import java.io.File;
@@ -70,7 +74,11 @@ public class MinerUProcessBaseServiceImpl implements FileProcessService {
     private KnowledgeDocumentService knowledgeDocumentService;
 
     @Autowired
+    @Qualifier("dashScopeChatModel")
     private ChatModel chatModel;
+
+    @Autowired
+    private OllamaChatModel ollamaChatModel;
 
     @Value("${file.parse.api.url:http://localhost:8000}")
     private String fileParseApiUrl;
@@ -127,10 +135,8 @@ public class MinerUProcessBaseServiceImpl implements FileProcessService {
             log.info("ZIP 文件已解压到: {}", extractDir);
             // 4. 上传解压后的 md 和图片到 MinIO，并处理 md 内容
             String mdMinioUrl = processExtractedFiles(document, extractDir);
-
             // 5. 更新文档状态为已转换
             knowledgeDocumentService.advanceDocumentAndVersionStatus(document.getDocId(), document.getCurrentVersionId(), DocumentStatus.CONVERTED);
-
             log.info("文档 ZIP 转换完成，documentId: {}, mdUrl: {}", document.getDocTitle(), mdMinioUrl);
             return mdMinioUrl;
         } catch (Exception e) {
@@ -249,32 +255,69 @@ public class MinerUProcessBaseServiceImpl implements FileProcessService {
     }
 
     /**
-     * 生成图片描述
+     * 生成图片描述（本地 Ollama qwen3-vl:4b）
+     * <p>
+     * Ollama 运行在 Docker 容器中，可能无法直接访问 MinIO 的内网 URL，
+     * 因此先把图片下载为字节数组，再通过 Spring AI Media 以 base64 方式传入模型。
      *
      * @param minioUrl
      * @return
      */
     protected String generateImageDescription(String minioUrl) {
-        // 使用 DashScope 原生多模态接口，通过 multiModel(true) 切换到 multimodal-generation 端点
-        // 该端点支持图片 URL 方式调用，无需转 base64
-        DashScopeChatOptions options = DashScopeChatOptions.builder()
-                .model("qwen3-vl-flash")
-                .multiModel(true)
-                .enableThinking(false)
-                .build();
+        byte[] imageBytes = downloadImage(minioUrl);
+        MimeType mimeType = MimeTypeUtils.parseMimeType(getImageContentType(minioUrl));
 
         UserMessage userMessage = UserMessage.builder()
                 .text("请描述这张图片的内容，包括场景、对象、布局、颜色、文字信息，直接输出纯文本描述，不要多余说明，不要增加任何特殊符号，特别是换行符")
-                .media(new Media(MimeTypeUtils.IMAGE_JPEG, URI.create(minioUrl)))
+                .media(new Media(mimeType, new ByteArrayResource(imageBytes)))
                 .build();
 
-        return ChatClient.builder(chatModel)
-                .defaultOptions(options)
+        return ChatClient.builder(ollamaChatModel)
                 .build()
                 .prompt()
                 .messages(userMessage)
                 .call()
                 .content();
+    }
+
+    /**
+     * 生成图片描述（本地 Ollama qwen3-vl:4b）
+     * <p>
+     * Ollama 运行在 Docker 容器中，可能无法直接访问 MinIO 的内网 URL，
+     * 因此先把图片下载为字节数组，再通过 Spring AI Media 以 base64 方式传入模型。
+     *
+     * @param minioUrl
+     * @return
+     */
+    protected String generateImageDescriptionToBaiLian(String minioUrl) {
+        byte[] imageBytes = downloadImage(minioUrl);
+        MimeType mimeType = MimeTypeUtils.parseMimeType(getImageContentType(minioUrl));
+
+        UserMessage userMessage = UserMessage.builder()
+                .text("请描述这张图片的内容，包括场景、对象、布局、颜色、文字信息，直接输出纯文本描述，不要多余说明，不要增加任何特殊符号，特别是换行符")
+                .media(new Media(mimeType, new ByteArrayResource(imageBytes)))
+                .build();
+
+        return ChatClient.builder(ollamaChatModel)
+                .build()
+                .prompt()
+                .messages(userMessage)
+                .call()
+                .content();
+    }
+
+    /**
+     * 从 URL 下载图片字节数组
+     *
+     * @param imageUrl
+     * @return
+     */
+    private byte[] downloadImage(String imageUrl) {
+        try (InputStream in = URI.create(imageUrl).toURL().openStream()) {
+            return in.readAllBytes();
+        } catch (IOException e) {
+            throw new RuntimeException("下载图片失败: " + imageUrl, e);
+        }
     }
 
     /**
@@ -299,15 +342,11 @@ public class MinerUProcessBaseServiceImpl implements FileProcessService {
                     .addTextBody("backend", "pipeline").addTextBody("response_format_zip", "true")
                     .addTextBody("return_images", "true").addTextBody("return_model_output", "false")
                     .addTextBody("return_middle_json", "false").build();
-
             httpPost.setEntity(multipartEntity);
-
             log.info("开始调用文件解析接口（ZIP 模式）: {}", url);
-
             try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
                 int statusCode = response.getCode();
                 log.info("文件解析接口响应状态码: {}", statusCode);
-
                 HttpEntity responseEntity = response.getEntity();
                 if (statusCode == 200 && responseEntity != null) {
                     // 读取响应体为字节数组（ZIP 文件）

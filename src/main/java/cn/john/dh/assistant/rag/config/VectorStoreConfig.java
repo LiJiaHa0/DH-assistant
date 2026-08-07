@@ -6,6 +6,7 @@ import io.milvus.param.IndexType;
 import io.milvus.param.MetricType;
 import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.milvus.MilvusVectorStore;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -44,7 +45,7 @@ public class VectorStoreConfig {
      */
     @Bean
     @Primary
-    public MilvusVectorStore generalVectorStore(MilvusServiceClient milvusClient, EmbeddingModel embeddingModel) {
+    public MilvusVectorStore generalVectorStore(MilvusServiceClient milvusClient, @Qualifier("dashscopeEmbeddingModel") EmbeddingModel embeddingModel) {
         return MilvusVectorStore.builder(milvusClient, embeddingModel)
                 .collectionName("dh_general_docs")
                 .embeddingDimension(1024)
@@ -58,7 +59,7 @@ public class VectorStoreConfig {
      * 产品/业务文档库
      */
     @Bean
-    public MilvusVectorStore productVectorStore(MilvusServiceClient milvusClient, EmbeddingModel embeddingModel) {
+    public MilvusVectorStore productVectorStore(MilvusServiceClient milvusClient, @Qualifier("dashscopeEmbeddingModel") EmbeddingModel embeddingModel) {
         return MilvusVectorStore.builder(milvusClient, embeddingModel)
                 .collectionName("dh_product_docs")
                 .embeddingDimension(1024)
@@ -72,7 +73,7 @@ public class VectorStoreConfig {
      * 技术/开发文档库
      */
     @Bean
-    public MilvusVectorStore techVectorStore(MilvusServiceClient milvusClient, EmbeddingModel embeddingModel) {
+    public MilvusVectorStore techVectorStore(MilvusServiceClient milvusClient, @Qualifier("dashscopeEmbeddingModel") EmbeddingModel embeddingModel) {
         return MilvusVectorStore.builder(milvusClient, embeddingModel)
                 .collectionName("dh_tech_docs")
                 .embeddingDimension(1024)

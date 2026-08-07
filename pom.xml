@@ -17,7 +17,7 @@
     <properties>
         <java.version>21</java.version>
         <spring.ai.version>1.1.0</spring.ai.version>
-        <spring.ai.alibaba.version>1.1.0.0</spring.ai.alibaba.version>
+        <spring.ai.alibaba.version>1.1.2.0</spring.ai.alibaba.version>
         <fastjson.version>2.0.43</fastjson.version>
     </properties>
     <dependencies>
@@ -107,6 +107,13 @@
             <artifactId>spring-ai-starter-model-openai</artifactId>
             <version>${spring.ai.version}</version>
         </dependency>
+        <!-- Spring AI Ollama (本地多模态模型支持)
+         用于调用本地 Ollama 部署的视觉语言模型，实现图片识别与描述生成。-->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-ollama</artifactId>
+            <version>${spring.ai.version}</version>
+        </dependency>
         <!-- Spring AI Milvus Vector Store
          提供Milvus向量数据库集成，用于RAG检索增强生成 -->
         <dependency>
@@ -125,6 +132,13 @@
             <groupId>io.minio</groupId>
             <artifactId>minio</artifactId>
             <version>8.5.1</version>
+        </dependency>
+        <!-- Apache Commons Compress (显式指定 1.28.0，避免 MinIO 传递引入旧版 1.21 与 Tika 3.2.3 冲突，
+             旧版 getNextEntry() 返回 ArchiveEntry，新版返回 ZipArchiveEntry，否则抛 NoSuchMethodError) -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-compress</artifactId>
+            <version>1.28.0</version>
         </dependency>
         <!-- Apache HttpClient 5 (5.4+ required for TlsSocketStrategy) -->
         <dependency>

@@ -1197,6 +1197,19 @@
         .rag-segment-item-text { font-size: 14px; color: #333; line-height: 1.6; white-space: pre-wrap; word-break: break-all; max-height: 120px; overflow: hidden; }
         .rag-segment-item-text.expanded { max-height: none; }
         .rag-segment-toggle { font-size: 12px; color: var(--primary); cursor: pointer; margin-top: 4px; }
+        /* 父子分段区分样式 */
+        .rag-segment-item.segment-parent { border-left: 4px solid #1565c0; background: #f5f9ff; }
+        .rag-segment-item.segment-child { border-left: 4px solid #e65100; background: #fffaf5; }
+        .rag-seg-tag { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+        .rag-seg-tag.tag-parent { background: #e3f2fd; color: #1565c0; }
+        .rag-seg-tag.tag-child { background: #fff3e0; color: #e65100; }
+        .rag-seg-edit-btn {
+            padding: 3px 12px; font-size: 12px; border: 1px solid var(--primary); color: var(--primary);
+            background: #fff; border-radius: 6px; cursor: pointer; transition: all 0.2s;
+        }
+        .rag-seg-edit-btn:hover { background: var(--primary); color: #fff; }
+        .rag-seg-edit-btn.disabled { border-color: #ccc; color: #aaa; cursor: not-allowed; }
+        .rag-seg-edit-btn.disabled:hover { background: #fff; color: #aaa; }
 
         /* ========== 切片参数组 ========== */
         .rag-param-group { display: none; }
@@ -1596,6 +1609,52 @@
             </div>
         </div>
 
+        <!-- 分段编辑弹窗 -->
+        <div class="modal-overlay" id="ragSegEditModal">
+            <div class="modal-dialog modal-dialog-lg">
+                <div class="modal-header">
+                    <h3>编辑分段 <span id="ragSegEditTitle" style="font-size:14px;color:#888;"></span></h3>
+                    <button class="modal-close" id="ragSegEditClose">✕</button>
+                </div>
+                <div class="rag-form-group">
+                    <label class="rag-label">分段内容<span class="hint">保存后自动同步父分段文本并重新向量化</span></label>
+                    <textarea class="rag-input" id="ragSegEditText" style="min-height:220px;resize:vertical;font-family:inherit;line-height:1.6;"></textarea>
+                </div>
+                <div class="rag-modal-footer">
+                    <button class="rag-modal-btn btn-cancel" id="ragSegEditCancel">取消</button>
+                    <button class="rag-modal-btn btn-primary" id="ragSegEditSave">保存</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 数据预览弹窗（DATA_QUERY 类型） -->
+        <div class="modal-overlay" id="ragDataModal">
+            <div class="modal-dialog rag-modal-dialog-lg">
+                <div class="modal-header">
+                    <h3>数据预览 <span id="ragDataDocTitle" style="font-size:14px;color:#888;"></span></h3>
+                    <button class="modal-close" id="ragDataClose">✕</button>
+                </div>
+                <div class="rag-toolbar">
+                    <div class="rag-toolbar-left">
+                        <span id="ragDataCount" style="font-size:14px;color:#666;"></span>
+                    </div>
+                    <div class="rag-toolbar-right">
+                        <button class="rag-modal-btn btn-primary" style="font-size:12px;padding:4px 10px;" id="ragDataPrevBtn">上一页</button>
+                        <span class="rag-page-info" id="ragDataPageInfo">1 / 1</span>
+                        <button class="rag-modal-btn btn-primary" style="font-size:12px;padding:4px 10px;" id="ragDataNextBtn">下一页</button>
+                    </div>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table class="rag-table" id="ragDataTable">
+                        <thead id="ragDataTableHead"></thead>
+                        <tbody id="ragDataTableBody">
+                            <tr><td class="rag-empty-row">暂无数据</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
         <!-- 上传新版本弹窗 -->
         <div class="modal-overlay" id="ragVersionModal">
             <div class="modal-dialog modal-dialog-lg">
@@ -1626,6 +1685,10 @@
                 <div class="rag-modal-footer">
                     <button class="rag-modal-btn btn-cancel" id="ragVersionCancel">取消</button>
                     <button class="rag-modal-btn btn-success" id="ragVersionSubmit">上传新版本</button>
+                </div>
+                <div class="rag-progress" id="ragVersionProgress">
+                    <div class="rag-progress-bar"><div class="rag-progress-fill" id="ragVersionProgressFill"></div></div>
+                    <div class="rag-progress-text" id="ragVersionProgressText">0%</div>
                 </div>
             </div>
         </div>
@@ -2827,16 +2890,31 @@
             ragUploadBtn.disabled = true;
             ragUploadBtn.textContent = '上传中...';
 
+            // ===== 平滑模拟进度：约 10s 内缓慢爬升至 95%，之后暂停等待后端响应，响应返回后再补至 100% =====
+            let ragSimProgress = 0;
+            let ragSimTimer = null;
+            const ragRenderProgress = p => {
+                const percent = Math.min(100, Math.floor(p));
+                ragProgressFill.style.width = percent + '%';
+                ragProgressText.textContent = percent + '%';
+            };
+            const ragStopSimProgress = () => {
+                if (ragSimTimer) { clearInterval(ragSimTimer); ragSimTimer = null; }
+            };
+            // 每 400ms 递增 0.3~0.5，总量约 10s 到达 95%；越接近 95% 爬升越慢
+            ragSimTimer = setInterval(() => {
+                const step = (0.3 + Math.random() * 0.2) * (1 - ragSimProgress / 100);
+                ragSimProgress = Math.min(95, ragSimProgress + step);
+                ragRenderProgress(ragSimProgress);
+                if (ragSimProgress >= 95) ragStopSimProgress();
+            }, 400);
+
             const xhr = new XMLHttpRequest();
-            xhr.upload.addEventListener('progress', e => {
-                if (e.lengthComputable) {
-                    const percent = Math.round((e.loaded / e.total) * 100);
-                    ragProgressFill.style.width = percent + '%';
-                    ragProgressText.textContent = percent + '%';
-                }
-            });
             xhr.addEventListener('load', () => {
-                ragProgress.style.display = 'none';
+                // 后端已响应：停止模拟进度，补足到 100% 后短暂停留再展示结果
+                ragStopSimProgress();
+                ragRenderProgress(100);
+                setTimeout(() => { ragProgress.style.display = 'none'; }, 300);
                 ragUploadBtn.disabled = false;
                 ragUploadBtn.textContent = '开始上传';
                 // 统一解析 R 响应：{code,msg,data}
@@ -2884,6 +2962,7 @@
                 }
             });
             xhr.addEventListener('error', () => {
+                ragStopSimProgress();
                 ragProgress.style.display = 'none';
                 ragUploadBtn.disabled = false;
                 ragUploadBtn.textContent = '开始上传';
@@ -2916,7 +2995,24 @@
             if (ragSelectedIds.size === 0) { ragToast('请先选择要删除的文档', 'warning'); return; }
             showConfirm('确认删除选中的 ' + ragSelectedIds.size + ' 个文档？删除后将同时删除其下所有分段。', '批量删除').then(function(ok) {
                 if (!ok) return;
-                ragToast('删除接口开发中，暂不可用', 'info');
+                var ids = Array.from(ragSelectedIds);
+                fetch('/knowledge/document/batch-delete', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(ids)
+                })
+                .then(function(res) { return res.json(); })
+                .then(function(resp) {
+                    if (resp.code === 200) {
+                        ragToast('成功删除 ' + (resp.data || 0) + ' 个文档', 'success');
+                        loadRagDocuments();
+                    } else {
+                        ragToast(resp.msg || '批量删除失败', 'error');
+                    }
+                })
+                .catch(function(err) {
+                    ragToast('批量删除失败: ' + err.message, 'error');
+                });
             });
         });
 
@@ -2924,7 +3020,19 @@
         window.ragDeleteDocument = function(docId) {
             showConfirm('确认删除该文档？删除后将同时删除其下所有分段。', '删除文档').then(function(ok) {
                 if (!ok) return;
-                ragToast('删除接口开发中，暂不可用', 'info');
+                fetch('/knowledge/document/delete?docId=' + docId, { method: 'DELETE' })
+                    .then(function(res) { return res.json(); })
+                    .then(function(resp) {
+                        if (resp.code === 200) {
+                            ragToast('文档删除成功', 'success');
+                            loadRagDocuments();
+                        } else {
+                            ragToast(resp.msg || '删除失败', 'error');
+                        }
+                    })
+                    .catch(function(err) {
+                        ragToast('删除失败: ' + err.message, 'error');
+                    });
             });
         };
 
@@ -2947,20 +3055,214 @@
         document.getElementById('ragEditCancel').addEventListener('click', closeRagEditModal);
         document.getElementById('ragEditModal').addEventListener('click', function(e) { if (e.target === this) closeRagEditModal(); });
         document.getElementById('ragEditSave').addEventListener('click', function() {
-            ragToast('编辑接口开发中，暂不可用', 'info');
-            closeRagEditModal();
+            var docId = document.getElementById('ragEditDocId').value;
+            var title = document.getElementById('ragEditTitle').value.trim();
+            var desc = document.getElementById('ragEditDesc').value.trim();
+            if (!title) { ragToast('文档标题不能为空', 'warning'); return; }
+            var btn = this;
+            btn.disabled = true;
+            btn.textContent = '保存中...';
+            fetch('/knowledge/document/update', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ docId: Number(docId), docTitle: title, description: desc })
+            })
+            .then(function(res) { return res.json(); })
+            .then(function(resp) {
+                btn.disabled = false;
+                btn.textContent = '保存';
+                if (resp.code === 200 && resp.data) {
+                    ragToast('文档编辑成功', 'success');
+                    closeRagEditModal();
+                    loadRagDocuments();
+                } else {
+                    ragToast(resp.msg || '编辑失败', 'error');
+                }
+            })
+            .catch(function(err) {
+                btn.disabled = false;
+                btn.textContent = '保存';
+                ragToast('编辑失败: ' + err.message, 'error');
+            });
         });
 
         // ========== 查看分段 ==========
+        // 分段列表分页状态，默认每页20条
+        let ragSegDocId = null;
+        let ragSegCurrentPage = 1;
+        let ragSegTotalPages = 1;
+        const ragSegPageSize = 20;
+        // 当前页分段记录，供编辑弹窗回填使用
+        let ragSegRecords = [];
+
+        // 分段状态映射
+        const segStatusMap = {
+            'STORED': '已存储',
+            'VECTOR_STORED': '已向量化'
+        };
+
         window.ragViewSegments = function(docId) {
             const doc = ragDocRecords.find(function(d) { return d.docId === docId; });
             const docTitle = doc ? (doc.docTitle || '') : '';
             document.getElementById('ragSegmentDocTitle').textContent = '- ' + docTitle;
-            document.getElementById('ragSegmentCount').textContent = '';
-            document.getElementById('ragSegmentList').innerHTML = '<div style="text-align:center;padding:32px;color:#999;">分段接口开发中，暂不可用</div>';
+            ragSegDocId = docId;
+            ragSegCurrentPage = 1;
+            ragSegTotalPages = 1;
             document.getElementById('ragSegmentModal').style.display = 'flex';
             requestAnimationFrame(function() { document.getElementById('ragSegmentModal').classList.add('show'); });
+            loadRagSegments();
         };
+
+        // 加载分段列表
+        function loadRagSegments() {
+            const listEl = document.getElementById('ragSegmentList');
+            listEl.innerHTML = '<div style="text-align:center;padding:32px;color:#999;">加载中...</div>';
+            const params = new URLSearchParams();
+            params.set('docId', ragSegDocId);
+            params.set('current', ragSegCurrentPage);
+            params.set('size', ragSegPageSize);
+            fetch('/knowledge/segment/page?' + params.toString())
+                .then(res => res.json())
+                .then(data => {
+                    if (data.code === 200 && data.data) {
+                        const page = data.data;
+                        ragSegTotalPages = Math.max(page.pages || 1, 1);
+                        ragSegCurrentPage = page.current || 1;
+                        renderRagSegments(page.records || []);
+                        document.getElementById('ragSegmentCount').textContent = '共 ' + (page.total || 0) + ' 个分段';
+                        renderRagSegPagination();
+                    } else {
+                        listEl.innerHTML = '<div style="text-align:center;padding:32px;color:#999;">' + escapeHtml(data.msg || '加载失败') + '</div>';
+                        document.getElementById('ragSegmentCount').textContent = '';
+                    }
+                })
+                .catch(() => {
+                    listEl.innerHTML = '<div style="text-align:center;padding:32px;color:#999;">网络错误，请稍后重试</div>';
+                    document.getElementById('ragSegmentCount').textContent = '';
+                });
+        }
+
+        // 解析分段 metadata JSON 字符串
+        function parseSegMetadata(metadataStr) {
+            if (!metadataStr) return {};
+            try { return JSON.parse(metadataStr); } catch (e) { return {}; }
+        }
+
+        // 渲染分段列表
+        function renderRagSegments(records) {
+            const listEl = document.getElementById('ragSegmentList');
+            ragSegRecords = records || [];
+            if (!records || records.length === 0) {
+                listEl.innerHTML = '<div style="text-align:center;padding:32px;color:#999;">暂无分段数据</div>';
+                return;
+            }
+            listEl.innerHTML = records.map(function(seg, idx) {
+                const seqNo = (seg.chunkOrder != null) ? seg.chunkOrder + 1 : (ragSegCurrentPage - 1) * ragSegPageSize + idx + 1;
+                const text = seg.text || '';
+                const statusLabel = segStatusMap[seg.status] || seg.status || '-';
+                // 分段类型判定：父分段（skipEmbedding=1，存储完整原文不向量化）/ 子分段（metadata 含 parentChunkId）
+                const meta = parseSegMetadata(seg.metadata);
+                const isParent = seg.skipEmbedding === 1 || seg.skipEmbedding === '1';
+                const isChild = !!meta.parentChunkId;
+                const itemClass = isParent ? 'segment-parent' : (isChild ? 'segment-child' : '');
+                const tags = (isParent ? '<span class="rag-seg-tag tag-parent">父分段</span>' : '') +
+                    (isChild ? '<span class="rag-seg-tag tag-child">子分段</span>' : '');
+                // 父分段禁止直接编辑，需修改子分段后自动同步
+                const editBtn = isParent
+                    ? '<button class="rag-seg-edit-btn disabled" onclick="ragToast(\'父分段不支持直接编辑，请修改对应的子分段，父分段内容会自动同步\', \'warning\')">编辑</button>'
+                    : '<button class="rag-seg-edit-btn" onclick="ragOpenSegmentEdit(' + idx + ')">编辑</button>';
+                return '<div class="rag-segment-item ' + itemClass + '">' +
+                    '<div class="rag-segment-item-header">' +
+                        '<div style="display:flex;align-items:center;gap:8px;">' +
+                            '<span style="font-size:13px;font-weight:600;color:var(--primary);">#' + seqNo + '</span>' +
+                            tags +
+                        '</div>' +
+                        '<div class="rag-segment-item-meta">' +
+                            '<span>状态：' + escapeHtml(statusLabel) + '</span>' +
+                            '<span>字符数：' + text.length + '</span>' +
+                            editBtn +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="rag-segment-item-text" id="ragSegText' + idx + '">' + escapeHtml(text) + '</div>' +
+                    (text.length > 200 ? '<span class="rag-segment-toggle" onclick="ragToggleSegmentText(' + idx + ', this)">展开全文</span>' : '') +
+                    '</div>';
+            }).join('');
+        }
+
+        // ========== 分段编辑 ==========
+        let ragSegEditId = null;
+
+        // 打开分段编辑弹窗（仅子分段/普通分段可编辑）
+        window.ragOpenSegmentEdit = function(idx) {
+            const seg = ragSegRecords[idx];
+            if (!seg) return;
+            ragSegEditId = seg.id;
+            document.getElementById('ragSegEditTitle').textContent = '- #' + ((seg.chunkOrder != null) ? seg.chunkOrder + 1 : seg.id);
+            document.getElementById('ragSegEditText').value = seg.text || '';
+            document.getElementById('ragSegEditModal').style.display = 'flex';
+            requestAnimationFrame(function() { document.getElementById('ragSegEditModal').classList.add('show'); });
+        };
+
+        function closeRagSegEditModal() {
+            document.getElementById('ragSegEditModal').classList.remove('show');
+            setTimeout(function() { document.getElementById('ragSegEditModal').style.display = 'none'; }, 200);
+        }
+        document.getElementById('ragSegEditClose').addEventListener('click', closeRagSegEditModal);
+        document.getElementById('ragSegEditCancel').addEventListener('click', closeRagSegEditModal);
+        document.getElementById('ragSegEditModal').addEventListener('click', function(e) { if (e.target === this) closeRagSegEditModal(); });
+
+        // 保存分段文本，后端自动同步父分段并重新向量化
+        document.getElementById('ragSegEditSave').addEventListener('click', function() {
+            const btn = this;
+            const text = document.getElementById('ragSegEditText').value;
+            if (!text.trim()) { ragToast('分段内容不能为空', 'error'); return; }
+            btn.disabled = true;
+            btn.textContent = '保存中...';
+            fetch('/knowledge/segment/update', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: ragSegEditId, text: text })
+            })
+            .then(res => res.json())
+            .then(data => {
+                btn.disabled = false;
+                btn.textContent = '保存';
+                if (data.code === 200 && data.data === true) {
+                    ragToast('分段更新成功');
+                    closeRagSegEditModal();
+                    loadRagSegments();
+                } else {
+                    ragToast(data.msg || '更新失败', 'error');
+                }
+            })
+            .catch(function(err) {
+                btn.disabled = false;
+                btn.textContent = '保存';
+                ragToast('保存失败: ' + err.message, 'error');
+            });
+        });
+
+        // 展开/收起分段文本
+        window.ragToggleSegmentText = function(idx, el) {
+            const textEl = document.getElementById('ragSegText' + idx);
+            textEl.classList.toggle('expanded');
+            el.textContent = textEl.classList.contains('expanded') ? '收起' : '展开全文';
+        };
+
+        // 渲染分段分页信息
+        function renderRagSegPagination() {
+            document.getElementById('ragSegPageInfo').textContent = ragSegCurrentPage + ' / ' + ragSegTotalPages;
+            document.getElementById('ragSegPrevBtn').disabled = ragSegCurrentPage <= 1;
+            document.getElementById('ragSegNextBtn').disabled = ragSegCurrentPage >= ragSegTotalPages;
+        }
+
+        // 分段列表翻页按钮
+        document.getElementById('ragSegPrevBtn').addEventListener('click', function() {
+            if (ragSegCurrentPage > 1) { ragSegCurrentPage--; loadRagSegments(); }
+        });
+        document.getElementById('ragSegNextBtn').addEventListener('click', function() {
+            if (ragSegCurrentPage < ragSegTotalPages) { ragSegCurrentPage++; loadRagSegments(); }
+        });
 
         function closeRagSegmentModal() {
             document.getElementById('ragSegmentModal').classList.remove('show');
@@ -2970,9 +3272,110 @@
         document.getElementById('ragSegmentModal').addEventListener('click', function(e) { if (e.target === this) closeRagSegmentModal(); });
 
         // ========== 查看数据（DATA_QUERY 类型） ==========
+        let ragDataDocId = null;
+        let ragDataCurrentPage = 1;
+        let ragDataTotalPages = 1;
+        const ragDataPageSize = 10;
+
         window.ragViewData = function(docId) {
-            ragToast('数据预览接口开发中，暂不可用', 'info');
+            const doc = ragDocRecords.find(function(d) { return d.docId === docId; });
+            const docTitle = doc ? (doc.docTitle || '') : '';
+            document.getElementById('ragDataDocTitle').textContent = '- ' + docTitle;
+            ragDataDocId = docId;
+            ragDataCurrentPage = 1;
+            ragDataTotalPages = 1;
+            document.getElementById('ragDataModal').style.display = 'flex';
+            requestAnimationFrame(function() { document.getElementById('ragDataModal').classList.add('show'); });
+            loadRagData();
         };
+
+        // 加载数据预览
+        function loadRagData() {
+            const tbody = document.getElementById('ragDataTableBody');
+            const thead = document.getElementById('ragDataTableHead');
+            tbody.innerHTML = '<tr><td class="rag-empty-row">加载中...</td></tr>';
+            thead.innerHTML = '';
+            const params = new URLSearchParams();
+            params.set('current', ragDataCurrentPage);
+            params.set('size', ragDataPageSize);
+            fetch('/table-meta/data/' + ragDataDocId + '?' + params.toString())
+                .then(res => res.json())
+                .then(data => {
+                    if (data.code === 200 && data.data) {
+                        const result = data.data;
+                        ragDataTotalPages = Math.max(result.pages || 1, 1);
+                        ragDataCurrentPage = result.current || 1;
+                        renderRagDataTable(result.columns || [], result.records || []);
+                        document.getElementById('ragDataCount').textContent = '共 ' + (result.total || 0) + ' 条数据';
+                        renderRagDataPagination();
+                    } else {
+                        tbody.innerHTML = '<tr><td class="rag-empty-row">' + escapeHtml(data.msg || '加载失败') + '</td></tr>';
+                        document.getElementById('ragDataCount').textContent = '';
+                    }
+                })
+                .catch(() => {
+                    tbody.innerHTML = '<tr><td class="rag-empty-row">网络错误，请稍后重试</td></tr>';
+                    document.getElementById('ragDataCount').textContent = '';
+                });
+        }
+
+        // 渲染数据表格
+        function renderRagDataTable(columns, records) {
+            const thead = document.getElementById('ragDataTableHead');
+            const tbody = document.getElementById('ragDataTableBody');
+            if (!records || records.length === 0) {
+                thead.innerHTML = '';
+                tbody.innerHTML = '<tr><td class="rag-empty-row">暂无数据</td></tr>';
+                return;
+            }
+            // 优先使用列元数据渲染表头（显示原始中文列名）
+            var colNames = [];
+            if (columns && columns.length > 0) {
+                colNames = columns.map(function(c) { return c.columnName; });
+                thead.innerHTML = '<tr>' + columns.map(function(c) {
+                    return '<th>' + escapeHtml(c.originalHeader || c.columnName || '') + '</th>';
+                }).join('') + '</tr>';
+            } else {
+                // 无列元数据时，使用第一条记录的 key 作为表头
+                colNames = Object.keys(records[0]);
+                thead.innerHTML = '<tr>' + colNames.map(function(name) {
+                    return '<th>' + escapeHtml(name) + '</th>';
+                }).join('') + '</tr>';
+            }
+            // 渲染数据行
+            tbody.innerHTML = records.map(function(row) {
+                return '<tr>' + colNames.map(function(name) {
+                    var val = row[name];
+                    if (val === null || val === undefined) val = '';
+                    var cellText = String(val);
+                    // 长文本截断显示
+                    if (cellText.length > 100) { cellText = cellText.substring(0, 100) + '...'; }
+                    return '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(String(val)) + '">' + escapeHtml(cellText) + '</td>';
+                }).join('') + '</tr>';
+            }).join('');
+        }
+
+        // 渲染数据分页信息
+        function renderRagDataPagination() {
+            document.getElementById('ragDataPageInfo').textContent = ragDataCurrentPage + ' / ' + ragDataTotalPages;
+            document.getElementById('ragDataPrevBtn').disabled = ragDataCurrentPage <= 1;
+            document.getElementById('ragDataNextBtn').disabled = ragDataCurrentPage >= ragDataTotalPages;
+        }
+
+        // 数据预览翻页按钮
+        document.getElementById('ragDataPrevBtn').addEventListener('click', function() {
+            if (ragDataCurrentPage > 1) { ragDataCurrentPage--; loadRagData(); }
+        });
+        document.getElementById('ragDataNextBtn').addEventListener('click', function() {
+            if (ragDataCurrentPage < ragDataTotalPages) { ragDataCurrentPage++; loadRagData(); }
+        });
+
+        function closeRagDataModal() {
+            document.getElementById('ragDataModal').classList.remove('show');
+            setTimeout(function() { document.getElementById('ragDataModal').style.display = 'none'; }, 200);
+        }
+        document.getElementById('ragDataClose').addEventListener('click', closeRagDataModal);
+        document.getElementById('ragDataModal').addEventListener('click', function(e) { if (e.target === this) closeRagDataModal(); });
 
         // ========== 上传新版本 ==========
         window.ragOpenVersionModal = function(docId) {
@@ -3034,15 +3437,46 @@
             formData.append('version', version);
             if (changelog) formData.append('changelog', changelog);
 
-            fetch('/knowledge/document/upload-version', {
-                method: 'POST',
-                body: formData
-            })
-            .then(function(res) { return res.json(); })
-            .then(function(resp) {
+            // 重置进度条 UI
+            const vProgress = document.getElementById('ragVersionProgress');
+            const vProgressFill = document.getElementById('ragVersionProgressFill');
+            const vProgressText = document.getElementById('ragVersionProgressText');
+            vProgress.style.display = 'block';
+            vProgressFill.style.width = '0%';
+            vProgressText.textContent = '0%';
+
+            // 平滑模拟进度：约 10s 内缓慢爬升至 95%，后端响应后补至 100%
+            let vSimProgress = 0;
+            let vSimTimer = null;
+            const vRenderProgress = p => {
+                const percent = Math.min(100, Math.floor(p));
+                vProgressFill.style.width = percent + '%';
+                vProgressText.textContent = percent + '%';
+            };
+            const vStopSimProgress = () => {
+                if (vSimTimer) { clearInterval(vSimTimer); vSimTimer = null; }
+            };
+            vSimTimer = setInterval(() => {
+                const step = (0.3 + Math.random() * 0.2) * (1 - vSimProgress / 100);
+                vSimProgress = Math.min(95, vSimProgress + step);
+                vRenderProgress(vSimProgress);
+                if (vSimProgress >= 95) vStopSimProgress();
+            }, 400);
+
+            const xhr = new XMLHttpRequest();
+            xhr.addEventListener('load', () => {
+                vStopSimProgress();
+                vRenderProgress(100);
+                setTimeout(() => { vProgress.style.display = 'none'; }, 300);
                 btn.disabled = false;
                 btn.textContent = '上传新版本';
-                if (resp.code === 200 && resp.data) {
+                let resp = null;
+                try { resp = xhr.responseText ? JSON.parse(xhr.responseText) : null; } catch (e) {}
+                if (resp && resp.code !== 200) {
+                    ragToast(resp.msg || '上传失败', 'error');
+                    return;
+                }
+                if (xhr.status === 200 && resp && resp.code === 200) {
                     var doc = resp.data;
                     ragToast('新版本 v' + version + ' 上传成功', 'success');
                     closeRagVersionModal();
@@ -3056,14 +3490,21 @@
                         }, 300);
                     }
                 } else {
-                    ragToast(resp.msg || '上传失败', 'error');
+                    let msg = '服务器返回错误：' + xhr.status;
+                    if (resp && resp.msg) msg = resp.msg;
+                    ragToast(msg, 'error');
                 }
-            })
-            .catch(function(err) {
+            });
+            xhr.addEventListener('error', () => {
+                vStopSimProgress();
+                vProgress.style.display = 'none';
                 btn.disabled = false;
                 btn.textContent = '上传新版本';
-                ragToast('上传失败: ' + err.message, 'error');
+                ragToast('上传失败: 网络请求出错，请检查网络连接', 'error');
             });
+
+            xhr.open('POST', '/knowledge/document/upload-version');
+            xhr.send(formData);
         });
 
         // ========== 版本列表 ==========
@@ -3125,13 +3566,61 @@
             }
         });
 
+        // 切片提交
         document.getElementById('ragSplitSubmit').addEventListener('click', function() {
+            const btn = this;
+            if (btn.disabled) return;
+            const docId = document.getElementById('ragSplitDocId').value;
             const splitType = document.getElementById('ragSplitType').value;
             const chunkSize = document.getElementById('ragSplitChunkSize').value;
+            if (!docId) { ragToast('文档ID不存在', 'error'); return; }
             if (!splitType) { ragToast('请选择切片方式', 'warning'); return; }
             if (!chunkSize || chunkSize < 1) { ragToast('请输入有效的最大分段长度', 'warning'); return; }
-            ragToast('切片接口开发中，暂不可用', 'info');
-            closeRagSplitModal();
+
+            // 按切片方式校验各自的专属参数
+            const params = new URLSearchParams();
+            params.set('splitType', splitType);
+            params.set('chunkSize', chunkSize);
+            if (splitType === 'LENGTH' || splitType === 'TITLE') {
+                const overlap = document.getElementById('ragSplitOverlap').value;
+                if (overlap) params.set('overlap', overlap);
+            }
+            if (splitType === 'TITLE') {
+                const titleLevel = document.getElementById('ragSplitTitleLevel').value;
+                if (!titleLevel || titleLevel < 1 || titleLevel > 6) { ragToast('请输入有效的标题级数（1-6）', 'warning'); return; }
+                params.set('titleLevel', titleLevel);
+            }
+            if (splitType === 'REGEX') {
+                const regex = document.getElementById('ragSplitRegex').value.trim();
+                if (!regex) { ragToast('请输入正则表达式', 'warning'); return; }
+                params.set('regex', regex);
+            }
+            if (splitType === 'SEPARATOR') {
+                const separator = document.getElementById('ragSplitSeparator').value;
+                if (!separator) { ragToast('请输入分隔符', 'warning'); return; }
+                params.set('separator', separator);
+            }
+
+            btn.disabled = true;
+            const originText = btn.textContent;
+            btn.textContent = '切片中...';
+            fetch('/knowledge/document/split/' + docId, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: params.toString()
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.code === 200) {
+                        ragToast('切片成功，共生成 ' + (data.data || 0) + ' 个分段', 'success');
+                        closeRagSplitModal();
+                        loadRagDocuments();
+                    } else {
+                        ragToast('切片失败：' + (data.msg || '未知错误'), 'error');
+                    }
+                })
+                .catch(() => { ragToast('网络错误，请稍后重试', 'error'); })
+                .finally(() => { btn.disabled = false; btn.textContent = originText; });
         });
 
         // 初始加载文档列表

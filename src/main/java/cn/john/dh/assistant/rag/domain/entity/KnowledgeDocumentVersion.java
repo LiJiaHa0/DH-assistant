@@ -23,8 +23,8 @@ public class KnowledgeDocumentVersion extends BaseEntity {
     /**
      * 版本ID
      */
-    @TableId(type = IdType.AUTO)
-    private Long versionId;
+    @TableId(value = "id", type = IdType.AUTO)
+    private Long id;
 
     /**
      * 关联文档ID（knowledge_document.doc_id）

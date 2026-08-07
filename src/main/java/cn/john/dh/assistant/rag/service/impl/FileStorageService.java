@@ -106,4 +106,19 @@ public class FileStorageService {
                         .expiry(7, TimeUnit.DAYS)
                         .build());
     }
+
+    /**
+     * 从MinIO URL中提取对象名称
+     */
+    public String extractObjectNameFromUrl(String url) {
+        if (url == null || url.isEmpty()) {
+            return null;
+        }
+        // URL格式: http://endpoint/bucketName/objectName
+        int lastSlashIndex = url.lastIndexOf(bucketName) + bucketName.length();
+        if (lastSlashIndex == -1 || lastSlashIndex == url.length() - 1) {
+            return null;
+        }
+        return url.substring(lastSlashIndex + 1);
+    }
 }

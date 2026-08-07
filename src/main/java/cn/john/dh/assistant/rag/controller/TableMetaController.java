@@ -1,6 +1,7 @@
 package cn.john.dh.assistant.rag.controller;
 
 import cn.john.dh.assistant.common.R;
+import cn.john.dh.assistant.rag.domain.dto.TableDataPreviewVO;
 import cn.john.dh.assistant.rag.domain.entity.TableMeta;
 import cn.john.dh.assistant.rag.service.TableMetaService;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -108,6 +109,25 @@ public class TableMetaController {
     @GetMapping("/active")
     public R<List<TableMeta>> listActiveForQuery() {
         return R.ok(tableMetaService.listActiveForQuery());
+    }
+
+    /**
+     * 分页预览动态表数据（「数据查询」类型文档的「查看数据」功能）
+     * <p>
+     * 根据文档ID定位到对应的物理表（表名已包含 dh_data_query_ 前缀），
+     * 返回列信息和分页数据。
+     *
+     * @param docId   文档ID（knowledge_document.doc_id）
+     * @param current 当前页码（默认1）
+     * @param size    每页条数（默认10）
+     * @return 包含列信息、数据记录和分页元数据的预览结果
+     */
+    @GetMapping("/data/{docId}")
+    public R<TableDataPreviewVO> previewData(
+            @PathVariable Long docId,
+            @RequestParam(defaultValue = "1") Integer current,
+            @RequestParam(defaultValue = "10") Integer size) {
+        return R.ok(tableMetaService.previewTableData(docId, current, size));
     }
 
     /**

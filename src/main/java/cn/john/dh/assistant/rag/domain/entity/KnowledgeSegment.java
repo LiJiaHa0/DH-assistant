@@ -1,6 +1,7 @@
 package cn.john.dh.assistant.rag.domain.entity;
 
 import cn.john.dh.assistant.common.BaseEntity;
+import cn.john.dh.assistant.rag.domain.enums.SegmentStatus;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -71,7 +72,7 @@ public class KnowledgeSegment extends BaseEntity {
      * 状态：STORED, VECTOR_STORED
      */
     @TableField("status")
-    private String status;
+    private SegmentStatus status;
 
     /**
      * 是否跳过嵌入生成
