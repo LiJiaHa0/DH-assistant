@@ -2,17 +2,22 @@ package cn.john.dh.assistant.chat.controller;
 
 import cn.john.dh.assistant.agent.AgentTaskManager;
 import cn.john.dh.assistant.agent.deepresearch.PlanExecuteAgent;
+import cn.john.dh.assistant.agent.rag.RagAgent;
 import cn.john.dh.assistant.agent.websearch.WebSearchReactAgent;
 import cn.john.dh.assistant.chat.service.ChatConversationService;
 import cn.john.dh.assistant.chat.service.ChatMessageService;
 import cn.john.dh.assistant.common.R;
 import cn.john.dh.assistant.prompt.service.AgentPromptService;
+import cn.john.dh.assistant.rag.config.VectorStoreRouter;
+import cn.john.dh.assistant.rag.service.KnowledgeDocumentService;
+import cn.john.dh.assistant.rag.service.KnowledgeSegmentService;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.mcp.SyncMcpToolCallbackProvider;
+import org.springframework.ai.ollama.OllamaChatModel;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,8 +43,12 @@ import java.util.List;
 public class AgentChatController implements InitializingBean {
 
     @Autowired
-    @Qualifier("dashScopeChatModel")
+    @Qualifier("openAiChatModel")
     private ChatModel chatModel;
+
+    // 本地Ollama聊天模型，用于会话标题生成等轻量场景，避免消耗云端模型配额
+    @Autowired
+    private OllamaChatModel ollamaChatModel;
 
     @Autowired
     private ChatConversationService chatConversationService;
@@ -49,6 +58,18 @@ public class AgentChatController implements InitializingBean {
 
     @Autowired
     private AgentPromptService agentPromptService;
+
+    // 向量存储路由器，用于RAG知识库检索
+    @Autowired
+    private VectorStoreRouter vectorStoreRouter;
+
+    // 知识文档服务，用于按用户ID查询文档
+    @Autowired
+    private KnowledgeDocumentService knowledgeDocumentService;
+
+    // 知识片段服务，用于BM25关键词检索
+    @Autowired
+    private KnowledgeSegmentService knowledgeSegmentService;
 
     // Tavily 搜索引擎 API Key
     @Value("${tavily.api-key:}")
@@ -79,7 +100,7 @@ public class AgentChatController implements InitializingBean {
      * @param chatConversationService     会话服务
      * @param taskManager        任务管理器
      */
-    public AgentChatController(@Qualifier("dashScopeChatModel") ChatModel chatModel,
+    public AgentChatController(@Qualifier("openAiChatModel") ChatModel chatModel,
                            ChatConversationService chatConversationService,
                            AgentTaskManager taskManager) {
         // 设置聊天模型
@@ -120,6 +141,8 @@ public class AgentChatController implements InitializingBean {
         } catch (Exception e) {
             // 记录处理错误日志
             log.error("处理网页搜索请求时发生错误: ", e);
+            // 兜底清理：停止可能已注册的任务，避免残留任务锁定会话
+            cleanupTask(conversationId);
             return Flux.error(e);
         }
     }
@@ -153,8 +176,77 @@ public class AgentChatController implements InitializingBean {
         } catch (Exception e) {
             // 记录处理错误日志
             log.error("处理深度研究请求时发生错误: ", e);
+            // 兜底清理：停止可能已注册的任务，避免残留任务锁定会话
+            cleanupTask(conversationId);
             return Flux.error(e);
         }
+    }
+
+    /**
+     * 知识库问答流式端点
+     * 接收用户查询并返回SSE流式响应，使用RAG模式从知识库中检索相关信息
+     *
+     * @param query          用户查询内容
+     * @param conversationId 对话ID
+     * @return SSE流式响应
+     */
+    @GetMapping(value = "/rag/stream", produces = "text/event-stream;charset=UTF-8")
+    public Flux<String> ragStream(
+            @RequestParam String query,
+            @RequestParam String conversationId) {
+        // 记录请求日志
+        log.info("收到知识库问答请求: query={}, conversationId={}", query, conversationId);
+
+        // 校验查询参数非空
+        if (query == null || query.trim().isEmpty()) {
+            log.warn("查询参数为空或无效");
+            return Flux.error(new IllegalArgumentException("查询参数不能为空"));
+        }
+
+        try {
+            // 初始化知识库问答Agent
+            RagAgent agent = initRagAgent();
+            // 执行Agent并返回SSE流
+            return agent.execute(conversationId, query);
+        } catch (Exception e) {
+            // 记录处理错误日志
+            log.error("处理知识库问答请求时发生错误: ", e);
+            // 兜底清理：停止可能已注册的任务，避免残留任务锁定会话
+            cleanupTask(conversationId);
+            return Flux.error(e);
+        }
+    }
+
+    /**
+     * 初始化RagAgent（知识库问答）
+     * 配置ChatModel、会话服务、任务管理器、向量存储路由器、知识文档服务和知识片段服务
+     *
+     * @return 配置完成的RagAgent实例
+     */
+    private RagAgent initRagAgent() {
+        // 记录初始化日志
+        log.info("初始化知识库问答 Agent...");
+
+        // 构建知识库问答Agent
+        RagAgent ragAgent = RagAgent.builder()
+                // 设置聊天模型
+                .chatModel(chatModel)
+                // 设置会话服务
+                .chatConversationService(chatConversationService)
+                .chatMessageService(chatMessageService)
+                .agentPromptService(agentPromptService)
+                // 设置任务管理器
+                .taskManager(taskManager)
+                // 设置向量存储路由器
+                .vectorStoreRouter(vectorStoreRouter)
+                // 设置知识文档服务
+                .knowledgeDocumentService(knowledgeDocumentService)
+                // 设置知识片段服务
+                .knowledgeSegmentService(knowledgeSegmentService)
+                .build();
+        // 设置标题生成专用模型（本地Ollama）
+        ragAgent.setTitleModel(ollamaChatModel);
+        return ragAgent;
     }
 
     /**
@@ -167,8 +259,8 @@ public class AgentChatController implements InitializingBean {
         // 记录初始化日志
         log.info("初始化 PlanExecute Agent...");
 
-        // 构建并返回深度研究Agent
-        return PlanExecuteAgent.builder()
+        // 构建深度研究Agent
+        PlanExecuteAgent planExecuteAgent = PlanExecuteAgent.builder()
                 // 设置聊天模型
                 .chatModel(chatModel)
                 // 设置会话服务
@@ -182,6 +274,9 @@ public class AgentChatController implements InitializingBean {
                 // 设置最大研究轮次为3
                 .maxRounds(3)
                 .build();
+        // 设置标题生成专用模型（本地Ollama）
+        planExecuteAgent.setTitleModel(ollamaChatModel);
+        return planExecuteAgent;
     }
 
 
@@ -202,6 +297,22 @@ public class AgentChatController implements InitializingBean {
         return R.ok(stopped);
     }
 
+    /**
+     * 异常时的兜底任务清理
+     * Agent内部已对同步阶段异常做了清理，此处作为双重保障，
+     * 防止任务残留导致会话被"正在执行中"锁定
+     *
+     * @param conversationId 会话ID，为空时不做处理
+     */
+    private void cleanupTask(String conversationId) {
+        // 会话ID为空时跳过（新会话的ID由Agent内部创建，其清理已在Agent内部完成）
+        if (conversationId == null || conversationId.isEmpty()) {
+            return;
+        }
+        // 停止任务（不存在时返回false，无副作用）
+        taskManager.stopTask(conversationId);
+    }
+
 
 
     /**
@@ -214,8 +325,8 @@ public class AgentChatController implements InitializingBean {
         // 记录初始化日志
         log.info("初始化网页搜索 Agent...");
 
-        // 构建并返回网页搜索Agent
-        return WebSearchReactAgent.builder()
+        // 构建网页搜索Agent
+        WebSearchReactAgent webSearchAgent = WebSearchReactAgent.builder()
                 // 设置聊天模型
                 .chatModel(chatModel)
                 // 设置会话服务
@@ -227,6 +338,9 @@ public class AgentChatController implements InitializingBean {
                 // 设置MCP搜索工具（懒加载：启动时初始化失败则在此重试）
                 .tools(ensureWebSearchToolCallbacks())
                 .build();
+        // 设置标题生成专用模型（本地Ollama）
+        webSearchAgent.setTitleModel(ollamaChatModel);
+        return webSearchAgent;
     }
 
     @Override

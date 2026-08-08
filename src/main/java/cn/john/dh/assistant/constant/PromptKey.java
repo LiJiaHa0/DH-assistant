@@ -17,6 +17,10 @@ public enum PromptKey {
     EXECUTE_PLAN("execute_plan", "执行计划提示词"),
     CRITIQUE("critique", "评审提示词"),
     TOOL_EXECUTE("tool_execute", "工具执行提示词"),
+    KEYWORD_EXTRACTION("keyword_extraction", "关键词提取提示词"),
+    QUERY_REWRITE("query_rewrite", "查询重写提示词"),
+    INTENT_RECOGNITION("intent_recognition", "意图识别提示词"),
+    RAG_ANSWER("rag_answer", "知识库回答提示词"),
 
     ;
 

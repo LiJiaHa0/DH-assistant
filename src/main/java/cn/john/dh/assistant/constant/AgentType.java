@@ -13,6 +13,7 @@ public enum AgentType {
     FILE("file", "文件分析Agent"),
     SKILLS("skills", "全能技能Agent"),
     PLAN_EXECUTE("plan_execute", "深度研究Agent"),
+    RAG("rag", "知识库问答Agent"),
 
     ;
 

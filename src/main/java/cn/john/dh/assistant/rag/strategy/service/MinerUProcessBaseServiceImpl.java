@@ -7,7 +7,6 @@ import cn.john.dh.assistant.rag.domain.enums.KnowledgeBaseType;
 import cn.john.dh.assistant.rag.service.KnowledgeDocumentService;
 import cn.john.dh.assistant.rag.service.impl.FileStorageService;
 import cn.john.dh.assistant.rag.strategy.FileProcessService;
-import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.config.RequestConfig;
@@ -74,7 +73,7 @@ public class MinerUProcessBaseServiceImpl implements FileProcessService {
     private KnowledgeDocumentService knowledgeDocumentService;
 
     @Autowired
-    @Qualifier("dashScopeChatModel")
+    @Qualifier("openAiChatModel")
     private ChatModel chatModel;
 
     @Autowired

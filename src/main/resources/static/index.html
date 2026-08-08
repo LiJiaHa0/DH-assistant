@@ -1378,7 +1378,7 @@
                             <button class="q-btn" onclick="sendQuickQuestion('2025年AI Agent领域有哪些重要技术突破？')">🔍 2025年AI Agent领域有哪些重要技术突破？</button>
                             <button class="q-btn" onclick="sendQuickQuestion('深度对比React和Vue3的响应式原理')">⚡ 深度对比React和Vue3的响应式原理</button>
                             <button class="q-btn" onclick="sendQuickQuestion('帮我调研一下大模型推理优化的最新进展')">🔎 帮我调研一下大模型推理优化的最新进展</button>
-                            <button class="q-btn" onclick="sendQuickQuestion('Spring Boot 4有哪些重要变化？')">💡 Spring Boot 4有哪些重要变化？</button>
+                            <button class="q-btn" onclick="switchToRagAndAsk('知识库中关于Spring Boot安全配置有哪些内容？')">📚 知识库中关于Spring Boot安全配置有哪些内容？</button>
                         </div>
                     </div>
                 </div>
@@ -1396,6 +1396,10 @@
                                 <button class="tool-toggle" id="deepThinkToggle" title="深度思考">
                                     <span>⚡</span>
                                     <span>深度思考</span>
+                                </button>
+                                <button class="tool-toggle" id="ragToggle" title="知识库问答">
+                                    <span>📚</span>
+                                    <span>知识库</span>
                                 </button>
                             </div>
                             <div class="toolbar-right">
@@ -2058,15 +2062,28 @@
         this.style.height = Math.min(this.scrollHeight, maxH) + 'px';
     });
 
-    // 工具切换按钮（互斥：联网与深度思考只能选中一个）
+    // 工具切换按钮（互斥：联网、深度思考、知识库只能选中一个）
     document.getElementById('searchToggle').addEventListener('click', function() {
         this.classList.add('active');
         document.getElementById('deepThinkToggle').classList.remove('active');
+        document.getElementById('ragToggle').classList.remove('active');
     });
     document.getElementById('deepThinkToggle').addEventListener('click', function() {
         this.classList.add('active');
         document.getElementById('searchToggle').classList.remove('active');
+        document.getElementById('ragToggle').classList.remove('active');
     });
+    document.getElementById('ragToggle').addEventListener('click', function() {
+        this.classList.add('active');
+        document.getElementById('searchToggle').classList.remove('active');
+        document.getElementById('deepThinkToggle').classList.remove('active');
+    });
+
+    // 知识库快捷提问：自动切换到知识库模式并发送
+    function switchToRagAndAsk(text) {
+        document.getElementById('ragToggle').click();
+        sendQuickQuestion(text);
+    }
 
     function sendMessage() {
         // 如果正在发送，点击按钮变为停止生成
@@ -2119,9 +2136,10 @@
 
         const typingEl = appendTyping();
 
-        // 根据深度思考开关选择接口：开启时走深度研究接口，否则走普通搜索接口
+        // 根据工具开关选择接口：深度思考走深度研究接口，知识库走RAG接口，否则走普通搜索接口
         const deepThinkOn = document.getElementById('deepThinkToggle').classList.contains('active');
-        const streamPath = deepThinkOn ? '/agent/deep/stream' : '/agent/chat/stream';
+        const ragOn = document.getElementById('ragToggle').classList.contains('active');
+        const streamPath = deepThinkOn ? '/agent/deep/stream' : (ragOn ? '/agent/rag/stream' : '/agent/chat/stream');
         const url = streamPath + '?query=' + encodeURIComponent(text)
                   + '&conversationId=' + (isTempConversation() ? '' : encodeURIComponent(currentConvId));
         const es = new EventSource(url);

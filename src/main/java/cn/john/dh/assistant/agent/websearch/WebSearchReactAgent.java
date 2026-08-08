@@ -168,6 +168,7 @@ public class WebSearchReactAgent extends BaseAgent {
             // 返回错误流
             return Flux.error(new IllegalStateException("该会话正在执行中，请稍后再试"));
         }
+        try {
         // 清除之前记录的工具使用记录
         clearUsedTools();
         // 构建初始消息列表（System Prompt + 历史记忆 + 当前问题），并保存用户问题
@@ -180,6 +181,15 @@ public class WebSearchReactAgent extends BaseAgent {
         scheduleRound(messages, sink, ctx, convId);
         // 组装并返回响应流
         return assembleResponseFlux(sink, ctx, convId);
+        } catch (Exception e) {
+            // 同步阶段异常：此时响应流尚未返回，doFinally不会触发，必须主动清理任务，避免会话被永久锁定
+            if (taskManager != null) {
+                taskManager.stopTask(convId);
+            }
+            log.error("WebSearchReactAgent 启动异常", e);
+            // 返回错误流
+            return Flux.error(e);
+        }
     }
 
     /**

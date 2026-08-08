@@ -4,7 +4,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication(exclude = {
-    org.springframework.ai.model.openai.autoconfigure.OpenAiChatAutoConfiguration.class,
+    // OpenAI Chat 自动配置已启用：主聊天模型通过百炼 Token Plan（OpenAI 兼容协议）调用
     org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration.class,
     org.springframework.ai.model.openai.autoconfigure.OpenAiAudioSpeechAutoConfiguration.class,
     org.springframework.ai.model.openai.autoconfigure.OpenAiAudioTranscriptionAutoConfiguration.class,

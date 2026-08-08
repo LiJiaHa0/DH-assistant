@@ -8,7 +8,6 @@ import cn.john.dh.assistant.constant.AgentType;
 import cn.john.dh.assistant.constant.ChatMessageType;
 import cn.john.dh.assistant.constant.PromptKey;
 import cn.john.dh.assistant.prompt.service.AgentPromptService;
-import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
 import com.alibaba.fastjson2.JSON;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,6 +43,8 @@ public abstract class BaseAgent {
 
     // AI聊天模型
     protected ChatModel chatModel;
+    // 轻量任务专用模型（本地Ollama，用于标题生成、推荐问题等），未设置时回退使用chatModel
+    protected ChatModel titleModel;
     // Agent名称
     protected String name;
     // 聊天记忆
@@ -86,6 +87,17 @@ public abstract class BaseAgent {
         this.chatModel = chatModel;
         // 设置Agent类型标识
         this.agentType = agentType;
+    }
+
+    /**
+     * 设置轻量任务专用模型
+     * 用于会话标题生成、推荐问题生成等轻量场景，避免消耗云端模型配额
+     *
+     * @param titleModel 轻量任务模型（如本地Ollama模型）
+     */
+    public void setTitleModel(ChatModel titleModel) {
+        // 设置轻量任务专用模型
+        this.titleModel = titleModel;
     }
 
     /**
@@ -146,8 +158,10 @@ public abstract class BaseAgent {
             // 使用 BeanOutputConverter 进行结构化输出
             BeanOutputConverter<List<String>> converter = new BeanOutputConverter<>(new ParameterizedTypeReference<>() {
             });
-            // 使用chatModel构建ChatClient
-            String response = ChatClient.builder(chatModel).defaultOptions(DashScopeChatOptions.builder().model("qwen-turbo").enableThinking(false).build()).build()
+            // 优先使用轻量模型（本地Ollama），未配置时回退到主模型
+            ChatModel model = titleModel != null ? titleModel : chatModel;
+            // 使用轻量模型构建ChatClient
+            String response = ChatClient.builder(model).build()
                     // 创建提示词请求
                     .prompt()
                     // 设置消息列表
@@ -245,21 +259,24 @@ public abstract class BaseAgent {
         messages.add(new SystemMessage("你是一个对话标题生成助手。根据用户的第一句话，生成一个简洁的中文会话标题，要求：不超过20个字，不加引号，直接输出标题内容。"));
         messages.add(new UserMessage("请根据当前问题生成会话标题：" + question));
         Thread.ofVirtual().name("title" + conversation).start(() -> {
-            // 使用chatModel构建ChatClient
-            String response = ChatClient.builder(chatModel)
-                    .defaultOptions(DashScopeChatOptions.builder()
-                            .model("qwen-turbo")
-                            .enableThinking(false)
-                            .build()).build()
-                    // 创建提示词请求
-                    .prompt()
-                    // 设置消息列表
-                    .messages(messages)
-                    // 发起同步调用
-                    .call()
-                    // 获取响应内容
-                    .content();
-            chatConversationService.updateTitle(conversation, response);
+            try {
+                // 优先使用标题生成专用模型（本地Ollama），未配置时回退到主模型
+                ChatModel model = titleModel != null ? titleModel : chatModel;
+                // 使用标题模型构建ChatClient
+                String response = ChatClient.builder(model).build()
+                        // 创建提示词请求
+                        .prompt()
+                        // 设置消息列表
+                        .messages(messages)
+                        // 发起同步调用
+                        .call()
+                        // 获取响应内容
+                        .content();
+                chatConversationService.updateTitle(conversation, response);
+            } catch (Exception e) {
+                // 标题生成失败不影响主流程，仅记录错误日志
+                log.error("会话标题生成失败: conversationId={}", conversation, e);
+            }
         });
         return conversation;
     }
