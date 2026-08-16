@@ -3,6 +3,8 @@ package cn.john.dh.assistant.agent;
 import cn.john.dh.assistant.chat.domain.entity.ChatMessage;
 import cn.john.dh.assistant.chat.service.ChatConversationService;
 import cn.john.dh.assistant.chat.service.ChatMessageService;
+import cn.john.dh.assistant.chat.service.ChatTokenLimitService;
+import cn.john.dh.assistant.chat.util.ChatTokenUsageUtil;
 import cn.john.dh.assistant.common.AgentResponse;
 import cn.john.dh.assistant.constant.AgentType;
 import cn.john.dh.assistant.constant.ChatMessageType;
@@ -12,6 +14,7 @@ import com.alibaba.fastjson2.JSON;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -31,6 +34,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * @Author John
@@ -58,6 +62,9 @@ public abstract class BaseAgent {
 
     // Agent提示服务
     protected AgentPromptService agentPromptService;
+
+    // 每日聊天 Token 限制服务
+    protected ChatTokenLimitService chatTokenLimitService;
 
     // 任务管理器
     protected AgentTaskManager taskManager;
@@ -101,6 +108,41 @@ public abstract class BaseAgent {
     }
 
     /**
+     * 设置每日聊天 Token 限制服务
+     *
+     * @param chatTokenLimitService Token 限制服务
+     */
+    public void setChatTokenLimitService(ChatTokenLimitService chatTokenLimitService) {
+        this.chatTokenLimitService = chatTokenLimitService;
+    }
+
+    /**
+     * 获取当前主聊天模型的名称，用于落库统计
+     *
+     * @return 模型名称，无法识别时返回类名简写
+     */
+    protected String getModelName() {
+        if (chatModel == null) {
+            return "unknown";
+        }
+        try {
+            var defaultOptions = chatModel.getDefaultOptions();
+            if (defaultOptions != null) {
+                // Spring AI 各模型实现通常把 model 放在 options 中
+                var modelField = defaultOptions.getClass().getDeclaredField("model");
+                modelField.setAccessible(true);
+                Object modelValue = modelField.get(defaultOptions);
+                if (modelValue != null) {
+                    return modelValue.toString();
+                }
+            }
+        } catch (Exception e) {
+            // 忽略反射异常，回退到类名
+        }
+        return chatModel.getClass().getSimpleName();
+    }
+
+    /**
      * 执行Agent的核心方法
      * 子类必须实现此方法以定义具体的执行逻辑，返回SSE流式响应
      *
@@ -129,13 +171,27 @@ public abstract class BaseAgent {
 
 
     /**
-     * 生成推荐问题
+     * 生成推荐问题（不记录 token 的兼容版本）
      *
      * @param currentQuestion 当前问题
      * @param currentAnswer   当前答案
      * @return 推荐问题JSON字符串，失败返回null
      */
     protected String generateRecommendations(String currentQuestion, String currentAnswer, List<Message> historyMessage) {
+        return generateRecommendations(currentQuestion, currentAnswer, historyMessage, null, null);
+    }
+
+    /**
+     * 生成推荐问题，并记录 token 使用量
+     *
+     * @param currentQuestion 当前问题
+     * @param currentAnswer   当前答案
+     * @param promptTokens    prompt token 计数器
+     * @param generationTokens generation token 计数器
+     * @return 推荐问题JSON字符串，失败返回null
+     */
+    protected String generateRecommendations(String currentQuestion, String currentAnswer, List<Message> historyMessage,
+                                              AtomicLong promptTokens, AtomicLong generationTokens) {
         if (!enableRecommendations) {
             return null;
         }
@@ -145,8 +201,10 @@ public abstract class BaseAgent {
             //推荐问题的系统提示词
             messages.add(new SystemMessage(agentPromptService.getPromptContent(AgentType.REACT_AGENT, PromptKey.RECOMMEND_PROMPT)));
             if (!CollectionUtils.isEmpty(historyMessage)) {
-                historyMessage.add(new UserMessage("历史消息："));
-                messages.addAll(historyMessage);
+                messages.add(new UserMessage("历史消息："));
+                // 复制而非直接 addAll(historyMessage)：原实现先向调用方列表插入"历史消息："再整体复制，
+                // 会污染调用方的消息列表（后续轮次该标记会残留到模型上下文）
+                messages.addAll(new ArrayList<>(historyMessage));
             }
             // 添加系统消息，包含推荐问题的提示
             messages.add(new UserMessage("当前问题："));
@@ -158,21 +216,36 @@ public abstract class BaseAgent {
             // 使用 BeanOutputConverter 进行结构化输出
             BeanOutputConverter<List<String>> converter = new BeanOutputConverter<>(new ParameterizedTypeReference<>() {
             });
-            // 优先使用轻量模型（本地Ollama），未配置时回退到主模型
-            ChatModel model = titleModel != null ? titleModel : chatModel;
+            // 把结构化输出格式说明拼进 prompt，并额外强调只输出 JSON 数组，
+            // 提高本地轻量模型（Ollama）输出合法 JSON 的概率
+            messages.add(new SystemMessage(converter.getFormat()));
+            messages.add(new UserMessage("注意：请只输出一个 JSON 字符串数组，不要输出任何解释性文字或思考过程。"));
+            // 推荐问题改用主模型：本地轻量模型（Ollama）常不遵循 JSON 数组输出导致解析失败，
+            // 云端主模型（百炼 qwen3.6-flash）对结构化输出的遵循度更高、更稳定
+            ChatModel model = chatModel;
             // 使用轻量模型构建ChatClient
-            String response = ChatClient.builder(model).build()
+            ChatClientResponse response = ChatClient.builder(model).build()
                     // 创建提示词请求
                     .prompt()
                     // 设置消息列表
                     .messages(messages)
                     // 发起同步调用
                     .call()
-                    // 获取响应内容
-                    .content();
-            if (StringUtils.hasText(response)) {
-                // 使用转换器将模型响应解析为字符串列表
-                List<String> recommendations = converter.convert(response);
+                    // 获取完整客户端响应（含 Usage）
+                    .chatClientResponse();
+            String text = null;
+            if (response != null && response.chatResponse() != null
+                    && response.chatResponse().getResult() != null
+                    && response.chatResponse().getResult().getOutput() != null) {
+                text = response.chatResponse().getResult().getOutput().getText();
+                // 记录 token 使用量
+                if (promptTokens != null && generationTokens != null) {
+                    ChatTokenUsageUtil.recordUsage(response.chatResponse(), promptTokens, generationTokens);
+                }
+            }
+            if (StringUtils.hasText(text)) {
+                // 容错解析：轻量模型可能不严格输出 JSON 数组，标准转换失败后手动提取
+                List<String> recommendations = parseRecommendations(converter, text);
                 // 如果解析后的推荐列表非空
                 if (recommendations != null && !recommendations.isEmpty()) {
                     // 将推荐列表序列化为JSON字符串
@@ -184,15 +257,61 @@ public abstract class BaseAgent {
                 }
             }
             // 如果响应为空或格式无效，记录警告日志
-            log.warn("生成推荐问题失败，响应格式无效: {}", response);
+            log.warn("生成推荐问题失败，响应格式无效: {}", text);
             // 返回null表示生成失败
             return null;
         } catch (Exception e) {
-            // 捕获异常并记录错误日志
-            log.error("生成推荐问题异常", e);
+            // 推荐问题生成失败不影响主流程，降级为 warn（模型输出不符合预期属常见情况，无需打印完整堆栈）
+            log.warn("生成推荐问题失败: {}", e.getMessage());
             // 发生异常时返回null
             return null;
         }
+    }
+
+    /**
+     * 容错解析推荐问题：优先用 BeanOutputConverter 标准转换（模型严格输出 JSON 数组时）；
+     * 转换失败（如本地轻量模型返回了自然语言）时，尝试从文本中提取 JSON 数组。
+     *
+     * @param converter 结构化输出转换器
+     * @param text      模型原始输出文本
+     * @return 推荐问题列表，无法解析时返回 null
+     */
+    private List<String> parseRecommendations(BeanOutputConverter<List<String>> converter, String text) {
+        // 1. 标准结构化转换（模型正确输出 JSON 数组时走这里）
+        try {
+            List<String> list = converter.convert(text);
+            if (list != null && !list.isEmpty()) {
+                return list;
+            }
+        } catch (Exception e) {
+            // 模型未按 JSON 数组输出，降级到手动提取
+        }
+        // 2. 手动提取 JSON 数组（兼容模型输出带额外说明文字/markdown 代码块的情况）
+        try {
+            String trimmed = text.trim();
+            // 去掉可能的 markdown 代码块包裹
+            if (trimmed.startsWith("```")) {
+                trimmed = trimmed.replaceAll("^```\\w*\\n?", "").replaceAll("\\n?```$", "").trim();
+            }
+            // 先尝试整体按 JSON 数组解析
+            List<String> list = JSON.parseArray(trimmed, String.class);
+            if (list != null && !list.isEmpty()) {
+                return list;
+            }
+            // 提取第一个 [...] 片段再解析
+            int start = trimmed.indexOf('[');
+            int end = trimmed.lastIndexOf(']');
+            if (start >= 0 && end > start) {
+                String arrStr = trimmed.substring(start, end + 1);
+                list = JSON.parseArray(arrStr, String.class);
+                if (list != null && !list.isEmpty()) {
+                    return list;
+                }
+            }
+        } catch (Exception e) {
+            // 忽略，返回 null 即可
+        }
+        return null;
     }
 
     /**

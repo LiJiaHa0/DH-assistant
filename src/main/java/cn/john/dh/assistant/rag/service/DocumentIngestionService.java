@@ -114,7 +114,11 @@ public class DocumentIngestionService {
             segment.setEmbeddingId(segment.getChunkId());  // ← 同一个 ID
             segment.setStatus(SegmentStatus.VECTOR_STORED);
         }
-        knowledgeSegmentService.updateBatchById(segments);
+        // 检查批量更新结果：updateBatchById 静默失败会导致调用方（activateVersion）分页永远无法推进，必须显式失败
+        boolean updated = knowledgeSegmentService.updateBatchById(segments);
+        if (!updated) {
+            throw new BusinessException("分段向量状态回写失败，共 " + segments.size() + " 条");
+        }
         return documents.stream().map(Document::getId).toList();
     }
 

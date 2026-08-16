@@ -24,10 +24,13 @@ public class ChatMessageServiceImpl extends ServiceImpl<ChatMessageMapper, ChatM
 
     @Override
     public List<ChatMessage> listByConversationId(String conversationId, int maxMessages) {
-        return list(new LambdaQueryWrapper<ChatMessage>()
+        // 先按 id 倒序取最近 maxMessages 条，再反转回正序，保证返回的是"最近 N 条"而非"最早 N 条"
+        List<ChatMessage> messages = list(new LambdaQueryWrapper<ChatMessage>()
                 .eq(ChatMessage::getConversationId, conversationId)
-                .last("limit " + maxMessages)
-                .orderByAsc(ChatMessage::getId));
+                .orderByDesc(ChatMessage::getId)
+                .last("limit " + maxMessages));
+        java.util.Collections.reverse(messages);
+        return messages;
     }
 
     @Override

@@ -142,13 +142,28 @@ public class KnowledgeDocumentVersionServiceImpl extends ServiceImpl<KnowledgeDo
         return false;
     }
 
+    /**
+     * 清理文档的旧版本向量数据（保留当前版本）
+     * <p>修复：原实现误删了当前版本的向量（参数名即 currentVersionId），
+     * 与"清理旧版本"的语义相反；此处遍历所有版本，仅删除非当前版本。</p>
+     *
+     * @param docId            文档ID
+     * @param currentVersionId 需要保留的当前版本ID
+     * @param knowledgeBase    文档所属知识库
+     */
     @Override
     public boolean cleanupOldVersionData(Long docId, Long currentVersionId, KnowledgeBase knowledgeBase) {
         log.info("开始清理文档 {} 的旧版本数据（保留 versionId={}）", docId, currentVersionId);
-
-        // 清理旧版本向量
-        documentIngestionService.deleteByDocIdAndVersionId(docId, currentVersionId, knowledgeBase);
-        log.info("清理文档 {} 旧版本向量完成", docId);
+        List<KnowledgeDocumentVersion> versions = listByDocId(docId);
+        int cleaned = 0;
+        for (KnowledgeDocumentVersion version : versions) {
+            if (version.getId().equals(currentVersionId)) {
+                continue; // 保留当前版本
+            }
+            documentIngestionService.deleteByDocIdAndVersionId(docId, version.getId(), knowledgeBase);
+            cleaned++;
+        }
+        log.info("清理文档 {} 旧版本向量完成，共清理 {} 个版本", docId, cleaned);
         return true;
     }
 }

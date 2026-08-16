@@ -56,6 +56,11 @@
             <artifactId>sa-token-redis-jackson</artifactId>
             <version>1.39.0</version>
         </dependency>
+        <!-- Spring Security Crypto（仅用于 BCrypt 密码哈希，不引入完整安全框架） -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+        </dependency>
         <!-- Lombok -->
         <dependency>
             <groupId>org.projectlombok</groupId>

@@ -63,10 +63,10 @@ public class MarkdownProcessServiceImpl extends MinerUProcessBaseServiceImpl {
             String mdContent = readInputStreamAsString(inputStream);
             //将md内容替换图片地址alt文本
             String processedMdContent = enrichImageDescriptions(mdContent);
-            // 3. 上传处理后的 Markdown 到 MinIO
+            // 3. 上传处理后的 Markdown 到 MinIO（对象名带 docId 前缀，避免多用户同名文档互相覆盖）
             String docTitle = document.getDocTitle();
             String baseName = docTitle.contains(".") ? docTitle.substring(0, docTitle.lastIndexOf(".")) : docTitle;
-            String convertedObjectName = CONVERTED_FILE_DIR + baseName + ".md";
+            String convertedObjectName = CONVERTED_FILE_DIR + document.getDocId() + "/" + baseName + ".md";
             String convertedUrl = fileStorageService.uploadFile(
                     convertedObjectName,
                     processedMdContent.getBytes(StandardCharsets.UTF_8),
@@ -78,10 +78,11 @@ public class MarkdownProcessServiceImpl extends MinerUProcessBaseServiceImpl {
             return convertedUrl;
         } catch (Exception e) {
             log.error("Markdown 文档处理失败，documentId: {}", document.getDocTitle(), e);
-            // 处理失败，状态回滚为 UPLOADED
+            // 处理失败，状态回滚为 UPLOADED（文档与版本状态同步回滚，避免版本卡在 CONVERTING）
             document.setStatus(DocumentStatus.UPLOADED);
             boolean result = knowledgeDocumentService.updateById(document);
             BusinessExceptionUtils.throwBusinessException(!result, "文件UPLOADED状态更新失败");
+            rollbackVersionStatus(document);
             throw new RuntimeException("Markdown 文档处理失败: " + e.getMessage(), e);
         } finally {
             closeQuietly(inputStream);

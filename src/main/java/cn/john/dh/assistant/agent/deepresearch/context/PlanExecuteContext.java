@@ -6,6 +6,7 @@ import org.springframework.ai.chat.messages.Message;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 计划执行上下文
@@ -64,6 +65,11 @@ public class PlanExecuteContext {
      * 当前轮次
      */
     private int round;
+
+    // 累计 prompt tokens（流式 Usage 通常在最后一个 chunk 出现）
+    public final AtomicLong promptTokens = new AtomicLong(0);
+    // 累计 generation tokens
+    public final AtomicLong generationTokens = new AtomicLong(0);
 
     public PlanExecuteContext(String conversationId, String question) {
         this.conversationId = conversationId;

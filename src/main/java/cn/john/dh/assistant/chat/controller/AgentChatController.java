@@ -6,11 +6,16 @@ import cn.john.dh.assistant.agent.rag.RagAgent;
 import cn.john.dh.assistant.agent.websearch.WebSearchReactAgent;
 import cn.john.dh.assistant.chat.service.ChatConversationService;
 import cn.john.dh.assistant.chat.service.ChatMessageService;
+import cn.john.dh.assistant.chat.service.ChatTokenLimitService;
+import cn.john.dh.assistant.common.AgentResponse;
 import cn.john.dh.assistant.common.R;
+import cn.dev33.satoken.stp.StpUtil;
 import cn.john.dh.assistant.prompt.service.AgentPromptService;
 import cn.john.dh.assistant.rag.config.VectorStoreRouter;
+import cn.john.dh.assistant.rag.mapper.TableMetaMapper;
 import cn.john.dh.assistant.rag.service.KnowledgeDocumentService;
 import cn.john.dh.assistant.rag.service.KnowledgeSegmentService;
+import cn.john.dh.assistant.rag.service.impl.FileStorageService;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
@@ -59,6 +64,10 @@ public class AgentChatController implements InitializingBean {
     @Autowired
     private AgentPromptService agentPromptService;
 
+    // 每日聊天 Token 限制服务
+    @Autowired
+    private ChatTokenLimitService chatTokenLimitService;
+
     // 向量存储路由器，用于RAG知识库检索
     @Autowired
     private VectorStoreRouter vectorStoreRouter;
@@ -70,6 +79,14 @@ public class AgentChatController implements InitializingBean {
     // 知识片段服务，用于BM25关键词检索
     @Autowired
     private KnowledgeSegmentService knowledgeSegmentService;
+
+    // 表元数据 Mapper，用于 DATA_QUERY 类型知识库的 Text2SQL 查询
+    @Autowired
+    private TableMetaMapper tableMetaMapper;
+
+    // 文件存储服务，用于 RAG 参考来源的预签名 URL 转换
+    @Autowired
+    private FileStorageService fileStorageService;
 
     // Tavily 搜索引擎 API Key
     @Value("${tavily.api-key:}")
@@ -133,6 +150,12 @@ public class AgentChatController implements InitializingBean {
             return Flux.error(new IllegalArgumentException("查询参数不能为空"));
         }
 
+        // 每日 Token 限额前置校验
+        Flux<String> limitCheck = checkTokenLimit();
+        if (limitCheck != null) {
+            return limitCheck;
+        }
+
         try {
             // 初始化网页搜索Agent
             WebSearchReactAgent agent = initWebSearchAgent();
@@ -166,6 +189,12 @@ public class AgentChatController implements InitializingBean {
         if (query == null || query.trim().isEmpty()) {
             log.warn("查询参数为空或无效");
             return Flux.error(new IllegalArgumentException("查询参数不能为空"));
+        }
+
+        // 每日 Token 限额前置校验
+        Flux<String> limitCheck = checkTokenLimit();
+        if (limitCheck != null) {
+            return limitCheck;
         }
 
         try {
@@ -203,6 +232,12 @@ public class AgentChatController implements InitializingBean {
             return Flux.error(new IllegalArgumentException("查询参数不能为空"));
         }
 
+        // 每日 Token 限额前置校验
+        Flux<String> limitCheck = checkTokenLimit();
+        if (limitCheck != null) {
+            return limitCheck;
+        }
+
         try {
             // 初始化知识库问答Agent
             RagAgent agent = initRagAgent();
@@ -237,12 +272,18 @@ public class AgentChatController implements InitializingBean {
                 .agentPromptService(agentPromptService)
                 // 设置任务管理器
                 .taskManager(taskManager)
+                // 设置每日 Token 限制服务
+                .chatTokenLimitService(chatTokenLimitService)
                 // 设置向量存储路由器
                 .vectorStoreRouter(vectorStoreRouter)
                 // 设置知识文档服务
                 .knowledgeDocumentService(knowledgeDocumentService)
                 // 设置知识片段服务
                 .knowledgeSegmentService(knowledgeSegmentService)
+                // 设置表元数据 Mapper（用于 DATA_QUERY Text2SQL 查询）
+                .tableMetaMapper(tableMetaMapper)
+                // 设置文件存储服务（用于预签名 URL 转换）
+                .fileStorageService(fileStorageService)
                 .build();
         // 设置标题生成专用模型（本地Ollama）
         ragAgent.setTitleModel(ollamaChatModel);
@@ -269,6 +310,8 @@ public class AgentChatController implements InitializingBean {
                 .agentPromptService(agentPromptService)
                 // 设置任务管理器
                 .taskManager(taskManager)
+                // 设置每日 Token 限制服务
+                .chatTokenLimitService(chatTokenLimitService)
                 // 设置MCP搜索工具（懒加载：启动时初始化失败则在此重试）
                 .tools(ensureWebSearchToolCallbacks())
                 // 设置最大研究轮次为3
@@ -313,6 +356,24 @@ public class AgentChatController implements InitializingBean {
         taskManager.stopTask(conversationId);
     }
 
+    /**
+     * 校验用户当日 Token 限额。
+     * 额度不足时返回 AI 风格的 SSE 提示流，否则返回 null。
+     *
+     * @return 限额超限时的 SSE Flux，或 null（未超限）
+     */
+    private Flux<String> checkTokenLimit() {
+        String userId = StpUtil.getLoginIdAsString();
+        if (!chatTokenLimitService.isAvailable(userId)) {
+            log.warn("用户 {} 当日聊天 token 已达限制", userId);
+            return Flux.just(
+                    AgentResponse.text("今日聊天token已达限制，请联系管理员（wx:John-Lee9564）或明日再试。"),
+                    AgentResponse.complete()
+            );
+        }
+        return null;
+    }
+
 
 
     /**
@@ -335,6 +396,8 @@ public class AgentChatController implements InitializingBean {
                 .agentPromptService(agentPromptService)
                 // 设置任务管理器
                 .taskManager(taskManager)
+                // 设置每日 Token 限制服务
+                .chatTokenLimitService(chatTokenLimitService)
                 // 设置MCP搜索工具（懒加载：启动时初始化失败则在此重试）
                 .tools(ensureWebSearchToolCallbacks())
                 .build();

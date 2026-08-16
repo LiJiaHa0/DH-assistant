@@ -91,6 +91,7 @@ public class KnowledgeDocumentServiceImpl extends ServiceImpl<KnowledgeDocumentM
      * @return
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public KnowledgeDocument uploadDocument(KnowledgeUploadParam param) throws IOException {
         //判断文件内容是否已经上传过了
         String contentHash = calculateContentHash(param.file());
@@ -109,10 +110,10 @@ public class KnowledgeDocumentServiceImpl extends ServiceImpl<KnowledgeDocumentM
         }
         String fileName = param.file().getOriginalFilename();
         log.info("开始上传文件{}....", fileName);
-        // 用minio上传
+        // 用minio上传（对象名带 userId 前缀，避免多用户同名文件互相覆盖）
         String fileUrl = null;
         try {
-            fileUrl = fileStorageService.uploadFile(param.file(), fileName);
+            fileUrl = fileStorageService.uploadFile(param.file(), userId + "/" + fileName);
         } catch (Exception e) {
             removeDocumentWithSegments(knowledgeDocument.getDocId());
             log.error("文件上传失败，文档已删除", e);
@@ -155,10 +156,13 @@ public class KnowledgeDocumentServiceImpl extends ServiceImpl<KnowledgeDocumentM
      * @throws IOException
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public KnowledgeDocument uploadNewVersion(Long docId, String version, MultipartFile file, String changelog) throws IOException {
         // 查询文档
         KnowledgeDocument document = getById(docId);
         Assert.notNull(document, "文档不存在");
+        // 当前登录用户（用于 MinIO 对象名隔离）
+        String userId = StpUtil.getLoginIdAsString();
 
         // 校验版本号必须大于已有最大版本号
         String latestVersion = knowledgeDocumentVersionService.getLatestVersion(docId);
@@ -178,13 +182,12 @@ public class KnowledgeDocumentServiceImpl extends ServiceImpl<KnowledgeDocumentM
         String fileName = file.getOriginalFilename();
         String fileUrl = null;
         try {
-            fileUrl = fileStorageService.uploadFile(file, fileName);
+            fileUrl = fileStorageService.uploadFile(file, userId + "/" + fileName);
         } catch (Exception e) {
             log.error("文件上传失败", e);
             throw new BusinessException("文件上传失败，请稍后重试");
         }
         // 2. 先创建新版本记录，使 processDocument 内部可以推进版本状态
-        String userId = StpUtil.getLoginIdAsString();
         versionRecord = createVersionRecord(
                 document.getDocId(),userId, version, fileUrl, null,
                 userId, contentHash, DocumentStatus.UPLOADED, changelog);
@@ -424,12 +427,20 @@ public class KnowledgeDocumentServiceImpl extends ServiceImpl<KnowledgeDocumentM
                 .eq(KnowledgeSegment::getStatus, SegmentStatus.STORED)
                 .eq(KnowledgeSegment::getSkipEmbedding, 0)
                 .isNull(KnowledgeSegment::getEmbeddingId);
-        // 分页查询
+        // 分页查询：页码递增推进（原实现每轮复用同一页码，依赖筛选条件被动推进，
+        // 一旦某批 updateBatchById 静默失败将导致死循环）
+        long batchCount = 0;
         Page<KnowledgeSegment> page = knowledgeSegmentService.page(new Page<>(1, 100), queryWrapper);
         while (!page.getRecords().isEmpty()) {
             List<KnowledgeSegment> batch = page.getRecords();
             documentIngestionService.ingest(batch, knowledgeDocument.getDocType());
-            page = knowledgeSegmentService.page(new Page<>(page.getCurrent(), 100), queryWrapper);
+            batchCount++;
+            // 防御性上限：100 条/批 × 1000 批 = 10 万分段，正常场景足够；
+            // 若达到上限说明分段状态未推进，直接终止避免无限循环
+            if (batchCount > 1000) {
+                throw new BusinessException("向量化批次超过上限(1000)，疑似分段状态未推进，已终止: docId=" + docId);
+            }
+            page = knowledgeSegmentService.page(new Page<>(page.getCurrent() + 1, 100), queryWrapper);
         }
     }
 
@@ -484,19 +495,15 @@ public class KnowledgeDocumentServiceImpl extends ServiceImpl<KnowledgeDocumentM
     }
 
     /**
-     * 从MinIO完整URL中提取对象名称
+     * 从MinIO完整URL中提取对象名称（与 FileStorageService.extractObjectNameFromUrl 逻辑一致）
      * URL格式: {endpoint}/{bucketName}/{objectName}
-     * 例如: http://localhost:9000/dh-assistant/fileName.ext → fileName.ext
+     * 对象名可能包含目录（如 {userId}/{fileName}、converted/...），因此按 bucketName 定位截取。
      *
      * @param url MinIO文件URL
      * @return 对象名称
      */
     private String extractObjectName(String url) {
-        String[] parts = url.split("/", 5);
-        if (parts.length >= 5) {
-            return parts[4];
-        }
-        return url;
+        return fileStorageService.extractObjectNameFromUrl(url);
     }
 
     /**

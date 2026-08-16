@@ -1,5 +1,6 @@
 package cn.john.dh.assistant.common;
 
+import cn.dev33.satoken.exception.NotLoginException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -18,6 +19,15 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    /**
+     * 未登录/登录过期（Sa-Token NotLoginException）：返回 401，前端据此跳转登录页
+     */
+    @ExceptionHandler(NotLoginException.class)
+    public R<Void> handleNotLogin(NotLoginException e) {
+        log.warn("未登录或登录已过期: {}", e.getMessage());
+        return R.fail(401, "未登录或登录已过期");
+    }
 
     /**
      * 业务异常：直接返回业务提示信息，前端可展示 msg

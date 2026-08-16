@@ -3,8 +3,11 @@ package cn.john.dh.assistant.agent.websearch;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.john.dh.assistant.agent.AgentTaskManager;
 import cn.john.dh.assistant.agent.BaseAgent;
+import cn.john.dh.assistant.chat.domain.entity.ChatConversation;
 import cn.john.dh.assistant.chat.service.ChatConversationService;
 import cn.john.dh.assistant.chat.service.ChatMessageService;
+import cn.john.dh.assistant.chat.service.ChatTokenLimitService;
+import cn.john.dh.assistant.chat.util.ChatTokenUsageUtil;
 import cn.john.dh.assistant.constant.AgentType;
 import cn.john.dh.assistant.constant.ChatMessageType;
 import cn.john.dh.assistant.constant.PromptKey;
@@ -95,6 +98,7 @@ public class WebSearchReactAgent extends BaseAgent {
         this.chatConversationService = builder.conversationService; // 设置会话服务（字段继承自BaseAgent）
         this.chatMessageService = builder.chatMessageService; // 设置消息服务（字段继承自BaseAgent）
         this.agentPromptService = builder.agentPromptService;
+        this.chatTokenLimitService = builder.chatTokenLimitService; // 设置每日 Token 限制服务（字段继承自BaseAgent）
         this.taskManager = builder.taskManager; // 设置任务管理器（字段继承自BaseAgent）
         this.usedTools = new HashSet<>(); // 初始化已使用工具记录集合
         initChatClient(); // 初始化ChatClient实例
@@ -318,9 +322,37 @@ public class WebSearchReactAgent extends BaseAgent {
         String metadataStr = metadata.isEmpty() ? null : metadata.toJSONString();
         //保存Assistant Message（含思考过程、参考来源、推荐问题）
         chatMessageService.saveMessage(conversationId, ChatMessageType.ASSISTANT, ctx.finalAnswerBuffer.toString(), metadataStr);
+        // 扣减当日 Token 限额
+        consumeTokenLimit(conversationId, ctx);
         // 流结束时从任务管理器中移除任务
         if (taskManager != null) { // 如果任务管理器存在
             taskManager.stopTask(conversationId); // 停止并移除任务跟踪
+        }
+    }
+
+    /**
+     * 根据会话ID查询用户并扣减当日 Token 限额。
+     *
+     * @param conversationId 会话ID
+     * @param ctx            流式会话上下文
+     */
+    private void consumeTokenLimit(String conversationId, ChatStreamContext ctx) {
+        try {
+            if (chatTokenLimitService == null || chatConversationService == null) {
+                return;
+            }
+            ChatConversation conversation = chatConversationService.getByConversationId(conversationId);
+            if (conversation == null || !StringUtils.hasText(conversation.getUserId())) {
+                return;
+            }
+            long totalTokens = ChatTokenUsageUtil.getTotalTokens(ctx.promptTokens, ctx.generationTokens);
+            if (totalTokens > 0) {
+                chatTokenLimitService.consume(conversation.getUserId(), totalTokens);
+                log.info("WebSearchReactAgent 会话 {} 本次消耗 token: {}, model: {}",
+                        conversationId, totalTokens, getModelName());
+            }
+        } catch (Exception e) {
+            log.warn("WebSearchReactAgent 扣减 token 限额失败: conversationId={}", conversationId, e);
         }
     }
 
@@ -347,7 +379,11 @@ public class WebSearchReactAgent extends BaseAgent {
                 .chatResponse()
                 .publishOn(Schedulers.boundedElastic())
                 //处理单个响应快
-                .doOnNext(chunk -> processChunk(chunk, sink, state))
+                .doOnNext(chunk -> {
+                    // 记录 token 使用量（流式 Usage 通常只在最后一个 chunk 出现，用 max 覆盖）
+                    ChatTokenUsageUtil.recordUsage(chunk, ctx.promptTokens, ctx.generationTokens);
+                    processChunk(chunk, sink, state);
+                })
                 .doOnComplete(() -> finishRound(messages, sink, state, ctx, conversationId))
                 .doOnError(error -> {
                     if (!ctx.hasSentFinalResult.get()) { // 如果尚未发送最终结果
@@ -470,7 +506,8 @@ public class WebSearchReactAgent extends BaseAgent {
                 }
                 // 输出推荐问题（如果启用了推荐功能）
                 if (enableRecommendations) { // 如果推荐问题功能已启用
-                    String recommendations = generateRecommendations(currentQuestion, finalText, messages); // 调用BaseAgent方法生成推荐问题
+                    String recommendations = generateRecommendations(currentQuestion, finalText, messages,
+                            ctx.promptTokens, ctx.generationTokens); // 调用BaseAgent方法生成推荐问题
                     if (recommendations != null) { // 如果推荐问题生成成功
                         currentRecommendations = recommendations; // 保存到BaseAgent字段，供数据库存储使用
                         String recommendJson = createRecommendResponse(recommendations); // 生成推荐问题类型的SSE响应
@@ -483,6 +520,22 @@ public class WebSearchReactAgent extends BaseAgent {
                 ctx.hasSentFinalResult.set(true); // 标记已发送最终结果
                 return; // 最终答案已输出，结束本轮
             }
+            // 兜底：模型本轮既没有输出有效文本也没有调用工具（如只输出了think标签），
+            // 必须结束流，否则 executeToolCalls 空列表导致 onComplete 永不回调、前端永久转圈
+            log.warn("本轮无有效输出且无工具调用，强制结束流: conversationId={}", conversationId);
+            sink.tryEmitNext(createTextResponse("（模型未返回有效内容，请换个问法重试）"));
+            sink.tryEmitNext(createCompleteResponse());
+            sink.tryEmitComplete();
+            ctx.hasSentFinalResult.set(true);
+            return;
+        }
+        // 兜底：TOOL_CALL 模式但工具调用列表为空（理论异常），直接结束流避免挂起
+        if (state.toolCalls.isEmpty()) {
+            log.warn("TOOL_CALL 模式但工具调用列表为空，强制结束流: conversationId={}", conversationId);
+            sink.tryEmitNext(createCompleteResponse());
+            sink.tryEmitComplete();
+            ctx.hasSentFinalResult.set(true);
+            return;
         }
         // 有TOOL_CALL：将助手消息（包含工具调用）添加到消息列表
         AssistantMessage assistantMsg = AssistantMessage.builder().toolCalls(state.toolCalls).build(); // 构建包含工具调用的助手消息
@@ -548,6 +601,8 @@ public class WebSearchReactAgent extends BaseAgent {
                 //绑定到线程池
                 .publishOn(Schedulers.boundedElastic())
                 .doOnNext(chunk -> {
+                    // 记录 token 使用量
+                    ChatTokenUsageUtil.recordUsage(chunk, ctx.promptTokens, ctx.generationTokens);
                     if (chunk == null || chunk.getResult() == null || chunk.getResult().getOutput() == null) {
                         return;
                     }
@@ -582,7 +637,8 @@ public class WebSearchReactAgent extends BaseAgent {
                     // 输出推荐问题（如果启用了推荐功能）
                     if (enableRecommendations) { // 如果推荐功能已启用
                         // 生成推荐问题
-                        String recommendations = generateRecommendations(currentQuestion, finalText, messages);
+                        String recommendations = generateRecommendations(currentQuestion, finalText, messages,
+                                ctx.promptTokens, ctx.generationTokens);
                         // 如果生成成功
                         if (recommendations != null) {
                             // 保存推荐问题
@@ -799,6 +855,10 @@ public class WebSearchReactAgent extends BaseAgent {
         final StringBuilder thinkingBuffer = new StringBuilder();
         // 每次流式调用创建独立的Agent状态对象
         final AgentState agentState = new AgentState();
+        // 本轮累计 prompt tokens（流式 Usage 通常在最后一个 chunk 出现）
+        final AtomicLong promptTokens = new AtomicLong(0);
+        // 本轮累计 generation tokens
+        final AtomicLong generationTokens = new AtomicLong(0);
     }
 
     /**
@@ -812,12 +872,13 @@ public class WebSearchReactAgent extends BaseAgent {
         private ToolCallback[] tools; // 工具回调数组
         private String systemPrompt = ""; // 自定义系统提示词，默认为空字符串
         private int maxReflectionRounds; // 最大反思轮次
-        private int maxRounds; // 最大推理轮次
+        private int maxRounds = 5; // 最大推理轮次（默认5，防止未配置时无轮次上限导致工具无限调用）
         private List<Advisor> advisors; // Advisor列表
         private ChatMemory chatMemory; // 聊天记忆
         private ChatConversationService conversationService; // 会话服务
         private ChatMessageService chatMessageService; // 聊天消息服务
         private AgentPromptService agentPromptService; // 系统提示器服务
+        private ChatTokenLimitService chatTokenLimitService; // 每日 Token 限制服务
         private AgentTaskManager taskManager; // 任务管理器
 
         /**
@@ -849,6 +910,14 @@ public class WebSearchReactAgent extends BaseAgent {
          */
         public Builder agentPromptService(AgentPromptService agentPromptService) { // 设置系统提示器服务
             this.agentPromptService = agentPromptService; // 赋值系统提示器服务
+            return this; // 返回Builder支持链式调用
+        }
+
+        /**
+         * 设置每日 Token 限制服务。
+         */
+        public Builder chatTokenLimitService(ChatTokenLimitService chatTokenLimitService) { // 设置每日 Token 限制服务
+            this.chatTokenLimitService = chatTokenLimitService; // 赋值 Token 限制服务
             return this; // 返回Builder支持链式调用
         }
 

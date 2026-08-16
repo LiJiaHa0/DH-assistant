@@ -5,8 +5,11 @@ import cn.john.dh.assistant.agent.AgentTaskManager;
 import cn.john.dh.assistant.agent.BaseAgent;
 import cn.john.dh.assistant.agent.deepresearch.context.PlanExecuteContext;
 import cn.john.dh.assistant.agent.websearch.WebSearchReactAgent;
+import cn.john.dh.assistant.chat.domain.entity.ChatConversation;
 import cn.john.dh.assistant.chat.service.ChatConversationService;
 import cn.john.dh.assistant.chat.service.ChatMessageService;
+import cn.john.dh.assistant.chat.service.ChatTokenLimitService;
+import cn.john.dh.assistant.chat.util.ChatTokenUsageUtil;
 import cn.john.dh.assistant.common.AgentResponse;
 import cn.john.dh.assistant.constant.AgentType;
 import cn.john.dh.assistant.constant.ChatMessageType;
@@ -24,6 +27,7 @@ import com.alibaba.fastjson2.JSONObject;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -100,6 +104,8 @@ public class PlanExecuteAgent extends BaseAgent {
         this.agentPromptService = builder.agentPromptService;
         // 设置任务管理器（从BaseAgent继承的字段）
         this.taskManager = builder.taskManager;
+        // 设置每日 Token 限制服务（从BaseAgent继承的字段）
+        this.chatTokenLimitService = builder.chatTokenLimitService;
         // 初始化信号量，允许最多3个工具并发执行
         this.toolSemaphore = new Semaphore(3);
         // 初始化已使用工具名称集合（从BaseAgent继承的字段）
@@ -145,7 +151,8 @@ public class PlanExecuteAgent extends BaseAgent {
                         //主题生成后启动执行阶段
                         () -> executeLoopPhase(sink, ptx)));
         // 将Disposable关联到任务管理器以支持取消操作
-        registerTaskToManager(conversationId);
+        // 注意：必须使用解析后的 convId（conversationId 参数可能为 null，新会话时会导致 Disposable 关联失败、取消失效）
+        registerTaskToManager(convId);
         return complete(sink, ptx);
         } catch (Exception e) {
             // 同步阶段异常：此时响应流尚未返回，doFinally不会触发，必须主动清理任务，避免会话被永久锁定
@@ -199,9 +206,37 @@ public class PlanExecuteAgent extends BaseAgent {
         // 保存Assistant消息（最终答案 + 思考过程 + 参考来源）
         chatMessageService.saveMessage(context.getConversationId(), ChatMessageType.ASSISTANT,
                 context.getFinalAnswerBuffer().toString(), thinkingContent, metadataStr);
+        // 扣减当日 Token 限额
+        consumeTokenLimit(context);
         // 流结束时从任务管理器中移除任务
         if (taskManager != null) {
             taskManager.stopTask(context.getConversationId());
+        }
+    }
+
+    /**
+     * 根据会话ID查询用户并扣减当日 Token 限额。
+     *
+     * @param context 计划执行上下文
+     */
+    private void consumeTokenLimit(PlanExecuteContext context) {
+        try {
+            if (chatTokenLimitService == null || chatConversationService == null) {
+                return;
+            }
+            String conversationId = context.getConversationId();
+            ChatConversation conversation = chatConversationService.getByConversationId(conversationId);
+            if (conversation == null || !StringUtils.hasText(conversation.getUserId())) {
+                return;
+            }
+            long totalTokens = ChatTokenUsageUtil.getTotalTokens(context.promptTokens, context.generationTokens);
+            if (totalTokens > 0) {
+                chatTokenLimitService.consume(conversation.getUserId(), totalTokens);
+                log.info("PlanExecuteAgent 会话 {} 本次消耗 token: {}, model: {}",
+                        conversationId, totalTokens, getModelName());
+            }
+        } catch (Exception e) {
+            log.warn("PlanExecuteAgent 扣减 token 限额失败: conversationId={}", context.getConversationId(), e);
         }
     }
 
@@ -320,16 +355,27 @@ public class PlanExecuteAgent extends BaseAgent {
         Disposable disposable = chatClient.prompt()
                 .messages(messages)
                 .stream()
-                .content()
+                .chatResponse()
                 .doOnNext(chunk -> {
+                    // 记录 token 使用量（流式 Usage 通常只在最后一个 chunk 出现，用 max 覆盖）
+                    ChatTokenUsageUtil.recordUsage(chunk, context.promptTokens, context.generationTokens);
+                    // 提取文本内容
+                    String text = null;
+                    if (chunk != null && chunk.getResult() != null
+                            && chunk.getResult().getOutput() != null) {
+                        text = chunk.getResult().getOutput().getText();
+                    }
+                    if (text == null) {
+                        return;
+                    }
                     // 解析每一段chunk，如果有<think>标签则截取放到parse的segment中
-                    ThinkTagParser.ParseResult parse = ThinkTagParser.parse(chunk, context.getHasRequirementClarificationThink().get());
+                    ThinkTagParser.ParseResult parse = ThinkTagParser.parse(text, context.getHasRequirementClarificationThink().get());
                     context.setHasRequirementClarificationThink(new AtomicBoolean(parse.inThink()));
                     for (ThinkTagParser.Segment segment : parse.segments()) {
                         //先把<think>标签的内容数据推给页面
                         emit(sink, context.getHasSentFinalResult(), segment.content(), AgentResponse.TYPE_THINKING);
                         //如果没有<think>标签的内容当做正文内容，先保存到response中。
-                        if (!parse.inThink()) {
+                        if (!segment.thinking()) {
                             response.append(segment.content());
                         }
 
@@ -429,9 +475,20 @@ public class PlanExecuteAgent extends BaseAgent {
         chatClient.prompt()
                 .messages(messages)
                 .stream()
-                .content()
+                .chatResponse()
                 .doOnNext(chunk -> {
-                    ThinkTagParser.ParseResult parse = ThinkTagParser.parse(chunk, context.getHasResearchTopicThink().get());
+                    // 记录 token 使用量（流式 Usage 通常只在最后一个 chunk 出现，用 max 覆盖）
+                    ChatTokenUsageUtil.recordUsage(chunk, context.promptTokens, context.generationTokens);
+                    // 提取文本内容
+                    String text = null;
+                    if (chunk != null && chunk.getResult() != null
+                            && chunk.getResult().getOutput() != null) {
+                        text = chunk.getResult().getOutput().getText();
+                    }
+                    if (text == null) {
+                        return;
+                    }
+                    ThinkTagParser.ParseResult parse = ThinkTagParser.parse(text, context.getHasResearchTopicThink().get());
                     // 设置当前是否在思考中
                     context.setHasResearchTopicThink(new AtomicBoolean(parse.inThink()));
                     // 遍历解析出的每个文本段
@@ -651,6 +708,8 @@ public class PlanExecuteAgent extends BaseAgent {
                         // 直接返回
                         return;
                     }
+                    // 记录 token 使用量（流式 Usage 通常只在最后一个 chunk 出现，用 max 覆盖）
+                    ChatTokenUsageUtil.recordUsage(chunk, context.promptTokens, context.generationTokens);
                     // 检查响应块有效性
                     if ((chunk == null
                             || chunk.getResult() == null
@@ -670,9 +729,8 @@ public class PlanExecuteAgent extends BaseAgent {
                             emit(sink, context.getHasSentFinalResult(), segment.content(), AgentResponse.TYPE_THINKING);
                             // 如果是正文内容
                         } else {
-                            // 追加到最终回答缓冲区
-                            context.getFinalAnswerBuffer().append(segment.content());
-                            // 发送为文本响应
+                            // 发送为文本响应（正文由下游 doOnNext 统一累积到 finalAnswerBuffer，
+                            // 此处不再直接 append，避免与下游线程并发写 StringBuilder 且内容被重复保存）
                             emit(sink, context.getHasSentFinalResult(), segment.content(), AgentResponse.TYPE_TEXT);
                         }
                     }
@@ -728,13 +786,16 @@ public class PlanExecuteAgent extends BaseAgent {
                 new UserMessage(context.renderFullContext())
         ));
         // 同步调用LLM进行压缩
-        String snapshot = chatModel.call(prompt)
+        org.springframework.ai.chat.model.ChatResponse compressResponse = chatModel.call(prompt);
+        String snapshot = compressResponse
                 // 获取聊天结果
                 .getResult()
                 // 获取输出消息
                 .getOutput()
                 // 获取文本内容
                 .getText();
+        // 记录 token 使用量
+        ChatTokenUsageUtil.recordUsage(compressResponse, context.promptTokens, context.generationTokens);
         // 清空当前所有消息
         context.getMessages().clear();
         // 添加压缩后的状态消息
@@ -784,7 +845,10 @@ public class PlanExecuteAgent extends BaseAgent {
                 new UserMessage(userMessage.toString())
         ));
         // 同步调用LLM进行评审
-        String raw = chatClient.prompt(prompt).call().content();
+        ChatClientResponse critiqueResponse = chatClient.prompt(prompt).call().chatClientResponse();
+        String raw = critiqueResponse.chatResponse().getResult().getOutput().getText();
+        // 记录 token 使用量
+        ChatTokenUsageUtil.recordUsage(critiqueResponse.chatResponse(), context.promptTokens, context.generationTokens);
         // 去除think标签后解析评审结果
         CritiqueResult result = converter.convert(ThinkTagParser.stripThinkTags(raw));
         // 如果评审通过
@@ -1081,6 +1145,9 @@ public class PlanExecuteAgent extends BaseAgent {
                     .systemPrompt(agentPromptService.getPromptContent(AgentType.PLAN_EXECUTE,PromptKey.TOOL_EXECUTE))
                     // 设置提示词服务（内部构建系统提示词时使用）
                     .agentPromptService(agentPromptService)
+                    // 共享外部 token 计数器
+                    .promptTokens(context.promptTokens)
+                    .generationTokens(context.generationTokens)
                     // 监听工具执行结果，收集搜索参考来源
                     .toolResultListener((toolName, resultStr) -> {
                         // 记录使用的工具名称
@@ -1231,13 +1298,16 @@ public class PlanExecuteAgent extends BaseAgent {
             return new ArrayList<>();
         }
         // 同步调用LLM生成计划
-        String json = chatClient.prompt()
+        ChatClientResponse planResponse = chatClient.prompt()
                 // 设置提示消息
                 .messages(prompt.getInstructions())
                 // 执行同步调用
                 .call()
-                // 获取响应内容
-                .content();
+                // 获取完整客户端响应（含 Usage）
+                .chatClientResponse();
+        String json = planResponse.chatResponse().getResult().getOutput().getText();
+        // 记录 token 使用量
+        ChatTokenUsageUtil.recordUsage(planResponse.chatResponse(), context.promptTokens, context.generationTokens);
         // 去除think标签后解析为PlanTask列表
         List<PlanTask> planTasks = converter.convert(Objects.requireNonNull(ThinkTagParser.stripThinkTags(json)));
         // 发送计划生成完成消息
@@ -1365,6 +1435,8 @@ public class PlanExecuteAgent extends BaseAgent {
         private AgentPromptService agentPromptService;
         // 任务管理器字段，用于管理任务生命周期
         private AgentTaskManager taskManager;
+        // 每日 Token 限制服务字段
+        private ChatTokenLimitService chatTokenLimitService;
 
         public Builder chatModel(ChatModel chatModel) {
             this.chatModel = chatModel;
@@ -1407,6 +1479,11 @@ public class PlanExecuteAgent extends BaseAgent {
 
         public Builder taskManager(AgentTaskManager taskManager) {
             this.taskManager = taskManager;
+            return this;
+        }
+
+        public Builder chatTokenLimitService(ChatTokenLimitService chatTokenLimitService) {
+            this.chatTokenLimitService = chatTokenLimitService;
             return this;
         }
 

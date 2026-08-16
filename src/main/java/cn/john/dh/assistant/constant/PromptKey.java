@@ -21,6 +21,10 @@ public enum PromptKey {
     QUERY_REWRITE("query_rewrite", "查询重写提示词"),
     INTENT_RECOGNITION("intent_recognition", "意图识别提示词"),
     RAG_ANSWER("rag_answer", "知识库回答提示词"),
+    TEXT2SQL_GENERATE("text2sql_generate", "Text2SQL生成提示词"),
+    TEXT2SQL_VALIDATE("text2sql_validate", "Text2SQL校验反馈提示词"),
+    TEXT2SQL_CHECK("text2sql_check", "Text2SQL结果校验提示词"),
+    DATA_QUERY_GATE("data_query_gate", "数据查询路由判断提示词"),
 
     ;
 

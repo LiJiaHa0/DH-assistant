@@ -3,11 +3,15 @@ package cn.john.dh.assistant.agent.rag;
 import cn.dev33.satoken.stp.StpUtil;
 import cn.john.dh.assistant.agent.AgentTaskManager;
 import cn.john.dh.assistant.agent.BaseAgent;
+import cn.john.dh.assistant.chat.domain.entity.ChatConversation;
 import cn.john.dh.assistant.chat.service.ChatConversationService;
 import cn.john.dh.assistant.chat.service.ChatMessageService;
+import cn.john.dh.assistant.chat.service.ChatTokenLimitService;
+import cn.john.dh.assistant.chat.util.ChatTokenUsageUtil;
 import cn.john.dh.assistant.common.AgentResponse;
 import cn.john.dh.assistant.constant.AgentType;
 import cn.john.dh.assistant.constant.ChatMessageType;
+import cn.john.dh.assistant.constant.DataQueryConstant;
 import cn.john.dh.assistant.constant.MetadataKeyConstant;
 import cn.john.dh.assistant.constant.PromptKey;
 import cn.john.dh.assistant.entity.SearchResult;
@@ -17,8 +21,12 @@ import cn.john.dh.assistant.rag.config.KnowledgeBase;
 import cn.john.dh.assistant.rag.config.VectorStoreRouter;
 import cn.john.dh.assistant.rag.domain.entity.KnowledgeDocument;
 import cn.john.dh.assistant.rag.domain.entity.KnowledgeSegment;
+import cn.john.dh.assistant.rag.domain.entity.TableMeta;
+import cn.john.dh.assistant.rag.domain.enums.KnowledgeBaseType;
+import cn.john.dh.assistant.rag.mapper.TableMetaMapper;
 import cn.john.dh.assistant.rag.service.KnowledgeDocumentService;
 import cn.john.dh.assistant.rag.service.KnowledgeSegmentService;
+import cn.john.dh.assistant.rag.service.impl.FileStorageService;
 import cn.john.dh.assistant.utils.ThinkTagParser;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
@@ -26,10 +34,14 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import java.math.BigDecimal;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.messages.*;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.document.Document;
@@ -66,6 +78,15 @@ public class RagAgent extends BaseAgent {
     // 知识片段服务，用于BM25关键词检索
     private final KnowledgeSegmentService knowledgeSegmentService;
 
+    // 表元数据 Mapper，用于 DATA_QUERY 类型知识库的 Text2SQL 查询
+    private final TableMetaMapper tableMetaMapper;
+
+    // 文件存储服务，用于将私有 MinIO URL 转换为预签名公开 URL（参考来源展示）
+    private final FileStorageService fileStorageService;
+
+    // Text2SQL 最大重试次数（生成+校验+执行循环）
+    private static final int MAX_SQL_RETRY = 3;
+
     // 向量检索每个知识库的topK
     private final int vectorTopK;
 
@@ -96,6 +117,10 @@ public class RagAgent extends BaseAgent {
         this.knowledgeDocumentService = builder.knowledgeDocumentService;
         // 设置知识片段服务
         this.knowledgeSegmentService = builder.knowledgeSegmentService;
+        // 设置表元数据 Mapper（用于 DATA_QUERY Text2SQL 查询）
+        this.tableMetaMapper = builder.tableMetaMapper;
+        // 设置文件存储服务（用于预签名 URL）
+        this.fileStorageService = builder.fileStorageService;
         // 设置检索参数
         this.vectorTopK = builder.vectorTopK;
         this.bm25TopK = builder.bm25TopK;
@@ -106,6 +131,8 @@ public class RagAgent extends BaseAgent {
         this.chatMessageService = builder.chatMessageService;
         // 设置提示词服务
         this.agentPromptService = builder.agentPromptService;
+        // 设置每日 Token 限制服务（从BaseAgent继承的字段）
+        this.chatTokenLimitService = builder.chatTokenLimitService;
         // 设置任务管理器（从BaseAgent继承的字段）
         this.taskManager = builder.taskManager;
         // 初始化已使用工具名称集合（从BaseAgent继承的字段）
@@ -184,6 +211,18 @@ public class RagAgent extends BaseAgent {
                 String context = performRagPipeline(question, userId, sink, ctx);
                 // 检查是否已被停止
                 if (ctx.hasSentFinalResult.get()) {
+                    return;
+                }
+                // 检索不到相关内容：直接返回固定提示，不再让 LLM 基于通用知识硬答（避免幻觉/编造）
+                if (!StringUtils.hasText(context)) {
+                    emit(sink, ctx.hasSentFinalResult,
+                            "很抱歉，知识库中未检索到与您的问题相关的内容，无法基于知识库回答。\n\n"
+                                    + "建议您：\n"
+                                    + "1. 更换关键词或换一种提问方式\n"
+                                    + "2. 确认相关文档已上传到知识库\n"
+                                    + "3. 如需实时资讯、体育赛事等时效性信息，请切换到「联网」或「深度思考」模式",
+                            AgentResponse.TYPE_TEXT);
+                    complete(sink, ctx.hasSentFinalResult);
                     return;
                 }
                 // 流式生成回答
@@ -324,66 +363,162 @@ public class RagAgent extends BaseAgent {
         // 保存Assistant消息
         chatMessageService.saveMessage(conversationId, ChatMessageType.ASSISTANT,
                 ctx.finalAnswerBuffer.toString(), metadataStr);
+        // 扣减当日 Token 限额
+        consumeTokenLimit(conversationId, ctx);
         // 流结束时从任务管理器中移除任务
         if (taskManager != null) {
             taskManager.stopTask(conversationId);
         }
     }
+
+    /**
+     * 根据会话ID查询用户并扣减当日 Token 限额。
+     *
+     * @param conversationId 会话ID
+     * @param ctx            流式会话上下文
+     */
+    private void consumeTokenLimit(String conversationId, ChatStreamContext ctx) {
+        try {
+            if (chatTokenLimitService == null || chatConversationService == null) {
+                return;
+            }
+            ChatConversation conversation = chatConversationService.getByConversationId(conversationId);
+            if (conversation == null || !StringUtils.hasText(conversation.getUserId())) {
+                return;
+            }
+            long totalTokens = ChatTokenUsageUtil.getTotalTokens(ctx.promptTokens, ctx.generationTokens);
+            if (totalTokens > 0) {
+                chatTokenLimitService.consume(conversation.getUserId(), totalTokens);
+                log.info("RagAgent 会话 {} 本次消耗 token: {}, model: {}",
+                        conversationId, totalTokens, getModelName());
+            }
+        } catch (Exception e) {
+            log.warn("RagAgent 扣减 token 限额失败: conversationId={}", conversationId, e);
+        }
+    }
+
     // ==================== RAG 检索流程 ====================
 
     /**
-     * 执行RAG检索流程，编排关键词提取、查询重写、意图识别、向量检索、BM25检索、RRF融合等步骤
+     * 执行RAG检索流程，根据知识库文档类型分别执行不同检索策略：
+     * - DOCUMENT_SEARCH：关键词提取 + 查询重写 + 意图识别 + 向量检索 + BM25检索 + RRF融合
+     * - DATA_QUERY：Text2SQL 动态 SQL 生成 + 校验 + 执行（最多重试3次）
      * 每一步都通过sink向前端发送交互提示
      *
      * @param question 用户原始问题
+     * @param userId   用户ID
      * @param sink     响应流信号发射器
      * @param ctx      流式会话上下文
      * @return 检索结果拼接的上下文字符串，为空表示未检索到相关内容
      */
     private String performRagPipeline(String question, String userId,
                                        Sinks.Many<String> sink, ChatStreamContext ctx) {
-        // 1. 获取用户文档ID集合，用于知识库文档的user_id过滤召回
+        // 1. 获取用户文档列表，按类型分流
         emit(sink, ctx.hasSentFinalResult, "\n🔍 正在检索您的知识库文档...\n", AgentResponse.TYPE_THINKING);
-        Set<Long> userDocIds = getUserDocIds(userId);
-        if (userDocIds.isEmpty()) {
-            emit(sink, ctx.hasSentFinalResult, "⚠️ 您的知识库中暂无文档，将基于通用知识回答\n", AgentResponse.TYPE_THINKING);
+        List<KnowledgeDocument> userDocs = getUserDocuments(userId);
+        if (userDocs.isEmpty()) {
+            emit(sink, ctx.hasSentFinalResult, "⚠️ 您的知识库中暂无文档，无法基于知识库回答\n", AgentResponse.TYPE_THINKING);
             return "";
         }
-        emit(sink, ctx.hasSentFinalResult, "📄 共找到 " + userDocIds.size() + " 篇文档\n", AgentResponse.TYPE_THINKING);
+        emit(sink, ctx.hasSentFinalResult, "📄 共找到 " + userDocs.size() + " 篇文档\n", AgentResponse.TYPE_THINKING);
 
-        // 2. 关键词提取
+        // 按知识库类型分组：DOCUMENT_SEARCH vs DATA_QUERY
+        List<KnowledgeDocument> docSearchDocs = new ArrayList<>();
+        List<KnowledgeDocument> dataQueryDocs = new ArrayList<>();
+        for (KnowledgeDocument doc : userDocs) {
+            if (doc.getKnowledgeBaseType() == KnowledgeBaseType.DATA_QUERY) {
+                dataQueryDocs.add(doc);
+            } else {
+                docSearchDocs.add(doc);
+            }
+        }
+
+        StringBuilder fullContext = new StringBuilder();
+
+        // ============ DOCUMENT_SEARCH 路径：向量 + BM25 混合检索 ============
+        if (!docSearchDocs.isEmpty()) {
+            String docSearchContext = performDocumentSearchPipeline(question, docSearchDocs, sink, ctx);
+            if (docSearchContext != null && !docSearchContext.isEmpty()) {
+                fullContext.append(docSearchContext);
+            }
+        }
+
+        // ============ DATA_QUERY 路径：Text2SQL 动态查询 ============
+        if (!dataQueryDocs.isEmpty() && tableMetaMapper != null) {
+            String dataQueryContext = performDataQueryPipeline(question, dataQueryDocs, docSearchDocs, sink, ctx);
+            if (dataQueryContext != null && !dataQueryContext.isEmpty()) {
+                if (fullContext.length() > 0) {
+                    fullContext.append("\n");
+                }
+                fullContext.append(dataQueryContext);
+            }
+        }
+
+        String context = fullContext.toString();
+        if (context.isEmpty()) {
+            emit(sink, ctx.hasSentFinalResult, "⚠️ 知识库中未检索到相关内容，无法基于知识库回答\n", AgentResponse.TYPE_THINKING);
+        } else {
+            emit(sink, ctx.hasSentFinalResult, "✅ 检索完成，正在生成回答...\n", AgentResponse.TYPE_THINKING);
+        }
+
+        return context;
+    }
+
+    /**
+     * DOCUMENT_SEARCH 检索流程：关键词提取 → 查询重写 → 意图识别 → 向量检索 → BM25检索 → RRF融合
+     *
+     * @param question      用户原始问题
+     * @param docSearchDocs DOCUMENT_SEARCH 类型文档列表
+     * @param sink          响应流信号发射器
+     * @param ctx           流式会话上下文
+     * @return 文档检索上下文字符串
+     */
+    private String performDocumentSearchPipeline(String question, List<KnowledgeDocument> docSearchDocs,
+                                                  Sinks.Many<String> sink, ChatStreamContext ctx) {
+        // 提取用户文档ID集合（仅 DOCUMENT_SEARCH 类型）
+        Set<Long> userDocIds = new HashSet<>();
+        for (KnowledgeDocument doc : docSearchDocs) {
+            if (doc.getDocId() != null) {
+                userDocIds.add(doc.getDocId());
+            }
+        }
+        if (userDocIds.isEmpty()) {
+            return "";
+        }
+
+        // 关键词提取
         emit(sink, ctx.hasSentFinalResult, "\n🔑 正在提取关键词...\n", AgentResponse.TYPE_THINKING);
         ctx.keywords = extractKeywords(question, sink, ctx);
         emit(sink, ctx.hasSentFinalResult, "提取到关键词: " + String.join(", ", ctx.keywords) + "\n", AgentResponse.TYPE_THINKING);
 
-        // 3. 查询重写
+        // 查询重写
         emit(sink, ctx.hasSentFinalResult, "\n✏️ 正在重写查询...\n", AgentResponse.TYPE_THINKING);
         ctx.rewrittenQuery = rewriteQuery(question, sink, ctx);
         emit(sink, ctx.hasSentFinalResult, "重写后的查询: " + ctx.rewrittenQuery + "\n", AgentResponse.TYPE_THINKING);
 
-        // 4. 意图识别
+        // 意图识别
         emit(sink, ctx.hasSentFinalResult, "\n🎯 正在识别问题意图...\n", AgentResponse.TYPE_THINKING);
         JSONObject intentResult = recognizeIntent(question, sink, ctx);
         ctx.intent = intentResult.getString("intent");
         ctx.intentDescription = intentResult.getString("description");
         emit(sink, ctx.hasSentFinalResult, "意图类型: " + ctx.intent + "（" + ctx.intentDescription + "）\n", AgentResponse.TYPE_THINKING);
 
-        // 5. 向量语义检索（跨所有知识库，后过滤用户文档）
+        // 向量语义检索（跨所有知识库，后过滤用户文档）
         emit(sink, ctx.hasSentFinalResult, "\n📐 正在进行向量语义检索...\n", AgentResponse.TYPE_THINKING);
         List<RetrievalResult> vectorResults = vectorSearch(ctx.rewrittenQuery, userDocIds, sink, ctx);
         emit(sink, ctx.hasSentFinalResult, "向量检索到 " + vectorResults.size() + " 条结果\n", AgentResponse.TYPE_THINKING);
 
-        // 6. BM25关键词检索
+        // BM25关键词检索
         emit(sink, ctx.hasSentFinalResult, "\n🔎 正在进行BM25关键词检索...\n", AgentResponse.TYPE_THINKING);
         List<RetrievalResult> bm25Results = bm25Search(ctx.keywords, userDocIds, sink, ctx);
         emit(sink, ctx.hasSentFinalResult, "BM25检索到 " + bm25Results.size() + " 条结果\n", AgentResponse.TYPE_THINKING);
 
-        // 7. 去重 + RRF融合
+        // 去重 + RRF融合
         emit(sink, ctx.hasSentFinalResult, "\n🔀 正在进行结果融合与去重...\n", AgentResponse.TYPE_THINKING);
         List<RetrievalResult> fusedResults = deduplicateAndRRFFusion(vectorResults, bm25Results);
         emit(sink, ctx.hasSentFinalResult, "融合后得到 " + fusedResults.size() + " 条结果\n", AgentResponse.TYPE_THINKING);
 
-        // 8. 收集参考来源（去重，按文件名/URL过滤）
+        // 收集参考来源（去重，按文件名/URL过滤；私有 URL 转为预签名公开 URL 供前端展示）
         Set<String> refKeys = new HashSet<>();
         for (RetrievalResult result : fusedResults) {
             String refKey = result.fileName() != null ? result.fileName() : result.url();
@@ -391,19 +526,161 @@ public class RagAgent extends BaseAgent {
                 ctx.references.add(new SearchResult(
                         result.fileName(),
                         result.content().length() > 200 ? result.content().substring(0, 200) + "..." : result.content(),
-                        result.url()));
+                        toPublicUrl(result.url())));
             }
         }
 
-        // 9. 构建上下文
-        String context = buildContext(fusedResults);
-        if (context.isEmpty()) {
-            emit(sink, ctx.hasSentFinalResult, "⚠️ 知识库中未检索到相关内容，将基于通用知识回答\n", AgentResponse.TYPE_THINKING);
-        } else {
-            emit(sink, ctx.hasSentFinalResult, "✅ 检索完成，正在生成回答...\n", AgentResponse.TYPE_THINKING);
+        // 构建文档检索上下文
+        return buildContext(fusedResults);
+    }
+
+    /**
+     * DATA_QUERY 检索流程：根据文档 description 和表结构，通过 Text2SQL 生成并执行查询
+     * 对每个 DATA_QUERY 类型的文档，生成 SQL → 安全校验 → 执行 → 结果校验，最多重试 3 次
+     *
+     * @param question      用户原始问题
+     * @param dataQueryDocs DATA_QUERY 类型文档列表
+     * @param sink          响应流信号发射器
+     * @param ctx           流式会话上下文
+     * @return 数据查询结果上下文字符串
+     */
+    private String performDataQueryPipeline(String question, List<KnowledgeDocument> dataQueryDocs,
+                                             List<KnowledgeDocument> docSearchDocs,
+                                             Sinks.Many<String> sink, ChatStreamContext ctx) {
+        emit(sink, ctx.hasSentFinalResult, "\n📊 检测到 " + dataQueryDocs.size() + " 个数据查询类型知识库，正在分析表结构...\n", AgentResponse.TYPE_THINKING);
+
+        // 收集所有可用的查询表信息
+        List<QueryTableInfo> queryTables = new ArrayList<>();
+        for (KnowledgeDocument doc : dataQueryDocs) {
+            String tableName = doc.getTableName();
+            if (tableName == null || tableName.isEmpty()) {
+                continue;
+            }
+            // knowledge_document.table_name 存储的是不带前缀的业务表名，
+            // table_meta 与物理表均使用 dh_data_query_ 前缀，查询前需补全（已带前缀时不重复拼接）
+            String physicalTableName = tableName.startsWith(DataQueryConstant.TABLE_PREFIX)
+                    ? tableName
+                    : DataQueryConstant.TABLE_PREFIX + tableName;
+            try {
+                TableMeta tableMeta = tableMetaMapper.selectOne(
+                        new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<TableMeta>()
+                                .eq(TableMeta::getTableName, physicalTableName));
+                if (tableMeta != null) {
+                    String description = doc.getDescription() != null ? doc.getDescription() : tableMeta.getDescription();
+                    queryTables.add(new QueryTableInfo(
+                            doc.getDocId(),
+                            doc.getDocTitle(),
+                            description,
+                            physicalTableName,
+                            tableMeta.getColumnsInfo(),
+                            tableMeta.getCreateSql()));
+                }
+            } catch (Exception e) {
+                log.warn("查询表元数据失败: tableName={}, error={}", physicalTableName, e.getMessage());
+            }
         }
 
-        return context;
+        if (queryTables.isEmpty()) {
+            emit(sink, ctx.hasSentFinalResult, "⚠️ 未找到可用的数据查询表\n", AgentResponse.TYPE_THINKING);
+            return "";
+        }
+
+        // ===== 数据查询路由：先判断用户问题是否真的需要查询这些数据表 =====
+        // 修复：原实现只要存在 DATA_QUERY 文档就无条件执行 Text2SQL，
+        // 导致"技术选型对比"这类非数据检索问题也会去查表（甚至重试查全表）。
+        if (!shouldQueryDataTables(question, queryTables, docSearchDocs, sink, ctx)) {
+            return "";
+        }
+
+        // 打印可用表信息
+        for (QueryTableInfo table : queryTables) {
+            emit(sink, ctx.hasSentFinalResult, "📋 数据表: " + table.tableName()
+                    + "（" + (table.description() != null ? table.description() : table.docTitle()) + "）\n",
+                    AgentResponse.TYPE_THINKING);
+        }
+
+        // 收集当前用户文档允许查询的物理表名（SQL 安全校验白名单）
+        Set<String> allowedTables = queryTables.stream()
+                .map(QueryTableInfo::tableName)
+                .map(String::toLowerCase)
+                .collect(Collectors.toSet());
+
+        // 对每个表尝试 Text2SQL 查询（最多重试 3 次）
+        StringBuilder dataContext = new StringBuilder();
+        for (QueryTableInfo table : queryTables) {
+            emit(sink, ctx.hasSentFinalResult, "\n💡 正在为表 " + table.tableName() + " 生成查询SQL...\n", AgentResponse.TYPE_THINKING);
+            String result = generateAndExecuteSql(question, table, allowedTables, sink, ctx);
+            if (result != null && !result.isEmpty()) {
+                dataContext.append(result).append("\n");
+            }
+        }
+
+        return dataContext.toString().trim();
+    }
+
+    /**
+     * 数据查询路由判断：判断用户问题是否需要查询这些结构化数据表。
+     * <p>结合用户已有文档描述与数据表的业务描述，用快速模型做一次轻量分类，
+     * 要求"问题主题与数据表领域相关"才查表，避免"团建预算 vs 直播明细"这类
+     * 领域不匹配的问题也去执行 Text2SQL（浪费 token 且可能查全表混入无关数据）。</p>
+     *
+     * @param question     用户问题
+     * @param queryTables  候选数据表信息
+     * @param docSearchDocs 用户已有的文档检索类文档（用于判断问题主题归属）
+     * @param sink         响应流信号发射器
+     * @param ctx          流式会话上下文
+     * @return true 需要查询数据表；false 无需查询（跳过 Text2SQL）
+     */
+    private boolean shouldQueryDataTables(String question, List<QueryTableInfo> queryTables,
+                                          List<KnowledgeDocument> docSearchDocs,
+                                          Sinks.Many<String> sink, ChatStreamContext ctx) {
+        try {
+            emit(sink, ctx.hasSentFinalResult, "\n🧭 正在判断问题是否需要查询数据表...\n", AgentResponse.TYPE_THINKING);
+            String promptContent = agentPromptService.getPromptContent(AgentType.RAG, PromptKey.DATA_QUERY_GATE);
+            if (promptContent == null) {
+                promptContent = RagAgentPrompts.DATA_QUERY_GATE;
+            }
+            // 携带用户已有文档描述 + 数据表业务描述一起判断（文档描述用于判断问题主题与表的领域是否相关）
+            StringBuilder tablesDesc = new StringBuilder();
+            for (QueryTableInfo t : queryTables) {
+                tablesDesc.append("- 表名: ").append(t.tableName())
+                        .append("，描述: ").append(t.description() != null ? t.description() : t.docTitle())
+                        .append("\n");
+            }
+            StringBuilder docsDesc = new StringBuilder();
+            if (docSearchDocs != null) {
+                for (KnowledgeDocument d : docSearchDocs) {
+                    String desc = d.getDescription() != null && !d.getDescription().isEmpty()
+                            ? d.getDescription() : d.getDocTitle();
+                    docsDesc.append("- ").append(d.getDocTitle()).append("（").append(desc).append("）\n");
+                }
+            }
+            String userMessage = "## 用户已有的文档\n" + docsDesc
+                    + "\n## 数据表信息\n" + tablesDesc
+                    + "\n## 用户问题\n" + question;
+            String response = callFastModel(promptContent, userMessage, ctx);
+            if (StringUtils.hasText(response)) {
+                response = response.trim();
+                if (response.startsWith("```")) {
+                    response = response.replaceAll("^```\\w*\\n?", "").replaceAll("\\n?```$", "").trim();
+                }
+                JSONObject gateResult = JSON.parseObject(response);
+                boolean needsDataQuery = gateResult != null && Boolean.TRUE.equals(gateResult.getBoolean("needsDataQuery"));
+                if (needsDataQuery) {
+                    emit(sink, ctx.hasSentFinalResult, "✅ 判断需要查询数据表\n", AgentResponse.TYPE_THINKING);
+                } else {
+                    String reason = (gateResult != null && StringUtils.hasText(gateResult.getString("reason")))
+                            ? gateResult.getString("reason")
+                            : "问题与数据表无关";
+                    emit(sink, ctx.hasSentFinalResult, "⏭️ 判断无需查询数据表（" + reason + "），跳过数据查询\n", AgentResponse.TYPE_THINKING);
+                }
+                return needsDataQuery;
+            }
+        } catch (Exception e) {
+            log.warn("数据查询路由判断失败: {}", e.getMessage());
+        }
+        // 判断失败（模型未返回/解析异常）时保守返回 true，避免漏掉真实的数据查询需求
+        return true;
     }
 
     /**
@@ -421,7 +698,7 @@ public class RagAgent extends BaseAgent {
             if (promptContent == null) {
                 promptContent = RagAgentPrompts.KEYWORD_EXTRACTION;
             }
-            String response = callFastModel(promptContent, question);
+            String response = callFastModel(promptContent, question, ctx);
             if (StringUtils.hasText(response)) {
                 // 清理可能的markdown代码块包裹
                 response = response.trim();
@@ -462,7 +739,7 @@ public class RagAgent extends BaseAgent {
             if (promptContent == null) {
                 promptContent = RagAgentPrompts.QUERY_REWRITE;
             }
-            String response = callFastModel(promptContent, question);
+            String response = callFastModel(promptContent, question, ctx);
             if (StringUtils.hasText(response)) {
                 return response.trim();
             }
@@ -487,7 +764,7 @@ public class RagAgent extends BaseAgent {
             if (promptContent == null) {
                 promptContent = RagAgentPrompts.INTENT_RECOGNITION;
             }
-            String response = callFastModel(promptContent, question);
+            String response = callFastModel(promptContent, question, ctx);
             if (StringUtils.hasText(response)) {
                 response = response.trim();
                 if (response.startsWith("```")) {
@@ -506,24 +783,16 @@ public class RagAgent extends BaseAgent {
     }
 
     /**
-     * 查询用户拥有的知识库文档ID集合
+     * 查询用户拥有的知识库文档列表
      * 通过knowledge_document表的user_id字段过滤，实现用户级别的知识库隔离
      *
      * @param userId 用户ID
-     * @return 文档ID集合，无文档时返回空集合
+     * @return 文档列表，无文档时返回空列表
      */
-    private Set<Long> getUserDocIds(String userId) {
+    private List<KnowledgeDocument> getUserDocuments(String userId) {
         QueryWrapper<KnowledgeDocument> wrapper = new QueryWrapper<>();
-        wrapper.eq("user_id", userId)
-                .select("doc_id");
-        List<KnowledgeDocument> docs = knowledgeDocumentService.list(wrapper);
-        Set<Long> docIds = new HashSet<>();
-        for (KnowledgeDocument doc : docs) {
-            if (doc.getDocId() != null) {
-                docIds.add(doc.getDocId());
-            }
-        }
-        return docIds;
+        wrapper.eq("user_id", userId);
+        return knowledgeDocumentService.list(wrapper);
     }
 
     /**
@@ -620,7 +889,8 @@ public class RagAgent extends BaseAgent {
                             if (i > 0) {
                                 w.or();
                             }
-                            w.like("`text`", keywords.get(i));
+                            // LIKE 参数化 + 通配符转义（% _ \），避免关键词中的特殊字符被当作通配符
+                            w.apply("`text` LIKE {0} ESCAPE '\\\\'", "%" + escapeLikeKeyword(keywords.get(i)) + "%");
                         }
                     });
             List<KnowledgeSegment> segments = knowledgeSegmentService.list(wrapper);
@@ -826,6 +1096,610 @@ public class RagAgent extends BaseAgent {
         return value == null ? null : value.toString();
     }
 
+    // ==================== Text2SQL 核心方法 ====================
+
+    /**
+     * 为指定数据表生成并执行 SQL 查询，带安全校验和结果校验，最多重试 MAX_SQL_RETRY 次
+     * 流程：生成 SQL → 安全校验 → 执行查询 → 结果校验 → 不合格则重试
+     *
+     * @param question 用户原始问题
+     * @param table    查询表信息（包含表名、描述、列信息）
+     * @param sink     响应流信号发射器
+     * @param ctx      流式会话上下文
+     * @return 格式化的查询结果上下文，全部重试失败时返回 null
+     */
+    private String generateAndExecuteSql(String question, QueryTableInfo table, Set<String> allowedTables,
+                                         Sinks.Many<String> sink, ChatStreamContext ctx) {
+        String schemaDescription = buildSchemaDescription(table);
+        // 采样真实数据行（前 3 行）注入 schema，让 LLM 直接看到各列的值格式，无需猜测
+        List<Map<String, Object>> sampleRows = fetchSampleRows(table.tableName());
+        if (!sampleRows.isEmpty()) {
+            schemaDescription = schemaDescription
+                    + "\n表数据样例(前" + sampleRows.size() + "行):\n"
+                    + formatSampleRows(sampleRows);
+        }
+        String lastError = null;
+
+        for (int attempt = 1; attempt <= MAX_SQL_RETRY; attempt++) {
+            try {
+                // 生成或修正 SQL
+                String sql;
+                if (attempt == 1) {
+                    // 首次：根据表结构和用户问题生成 SQL
+                    sql = generateSql(question, schemaDescription, ctx);
+                    emit(sink, ctx.hasSentFinalResult,
+                            "📝 第" + attempt + "次生成SQL: " + sql + "\n", AgentResponse.TYPE_THINKING);
+                    // 兜底：LLM 首次即认为问题与表无关时，通常返回不含 FROM 的"声明式"SQL
+                    // （如 SELECT '...' AS notice）。此时不执行、不重试，直接判定无需查表，
+                    // 避免重试后变成 SELECT * FROM 全表查询。
+                    if (!containsFromClause(sql)) {
+                        emit(sink, ctx.hasSentFinalResult,
+                                "⏭️ 模型判断该问题与数据表无关，跳过数据查询\n", AgentResponse.TYPE_THINKING);
+                        return null;
+                    }
+                } else {
+                    // 重试：带上一次错误信息重新生成
+                    sql = regenerateSql(question, schemaDescription, lastError, ctx);
+                    emit(sink, ctx.hasSentFinalResult,
+                            "🔄 第" + attempt + "次重新生成SQL: " + sql + "\n", AgentResponse.TYPE_THINKING);
+                }
+
+                // 安全校验：确保是只读 SELECT 语句，且只允许查询当前用户文档对应的物理表
+                String validationError = validateSqlSafety(sql, allowedTables);
+                if (validationError != null) {
+                    emit(sink, ctx.hasSentFinalResult,
+                            "⚠️ SQL安全校验未通过: " + validationError + "\n", AgentResponse.TYPE_THINKING);
+                    log.warn("Text2SQL 安全校验未通过: {}", validationError);
+                    // 安全违规（非 SELECT 语句）直接终止，不重试
+                    if (validationError.contains("禁止")) {
+                        return null;
+                    }
+                    lastError = validationError;
+                    continue;
+                }
+
+                // 执行 SQL 查询
+                emit(sink, ctx.hasSentFinalResult, "⚡ 正在执行查询...\n", AgentResponse.TYPE_THINKING);
+                List<Map<String, Object>> results = filterValidRows(tableMetaMapper.executeQuery(sql));
+
+                // 结果校验
+                if (results.isEmpty()) {
+                    emit(sink, ctx.hasSentFinalResult,
+                            "⚠️ 第" + attempt + "次查询结果为空\n", AgentResponse.TYPE_THINKING);
+                    lastError = "查询结果为空（WHERE 条件未匹配到任何行）。请重新对照列映射表的【含义】和【示例值】："
+                            + "确认数字ID、人名、日期等条件是否用对了列（不要把ID写到名称列），"
+                            + "日期格式是否与示例值一致（示例为 2026/3/17 时按月过滤应写 LIKE '2026/5/%'）";
+                    continue;
+                }
+
+                // 调用 LLM 校验结果是否有效回答了用户问题
+                boolean resultValid = checkSqlResults(question, results, ctx);
+                if (!resultValid && attempt < MAX_SQL_RETRY) {
+                    emit(sink, ctx.hasSentFinalResult,
+                            "⚠️ 第" + attempt + "次查询结果未能有效回答问题，尝试重新生成...\n",
+                            AgentResponse.TYPE_THINKING);
+                    lastError = "查询结果未能有效回答用户问题。请对照列映射表的【含义】和【示例值】检查是否选错了列或统计口径"
+                            + "（例如“销量/卖了多少”应选单量/数量类列，而不是金额列）";
+                    continue;
+                }
+
+                // 查询成功，格式化结果
+                emit(sink, ctx.hasSentFinalResult,
+                        "✅ 查询成功，获取到 " + results.size() + " 条数据\n", AgentResponse.TYPE_THINKING);
+                return buildDataQueryContext(table, sql, results);
+
+            } catch (Exception e) {
+                lastError = e.getMessage();
+                emit(sink, ctx.hasSentFinalResult,
+                        "❌ 第" + attempt + "次SQL执行失败: " + lastError + "\n", AgentResponse.TYPE_THINKING);
+                log.warn("Text2SQL 第{}次执行失败: {}", attempt, lastError);
+            }
+        }
+
+        emit(sink, ctx.hasSentFinalResult,
+                "⚠️ 表 " + table.tableName() + " 经过" + MAX_SQL_RETRY + "次尝试仍无法获取有效结果\n",
+                AgentResponse.TYPE_THINKING);
+        return null;
+    }
+
+    /**
+     * 过滤查询结果中的无效行，返回只含有有效数据的行列表（永不返回 null）。
+     * <p>
+     * 由于 MyBatis 默认 callSettersOnNulls=false，当聚合查询（如 SUM/COUNT）因
+     * WHERE 条件未匹配到任何记录而返回全 NULL 的一行时，映射出的 Map 元素会变成
+     * null（而非空 Map），进而导致后续 {@code results.get(0).keySet()} 抛 NPE。
+     * 此处把 null 行与所有列值均为 null 的“空行”一并剔除，使结果能正确走“查询为空”分支。
+     *
+     * @param rawResults 原始查询结果（可能为 null 或含 null 行）
+     * @return 过滤后的有效数据行列表
+     */
+    private List<Map<String, Object>> filterValidRows(List<Map<String, Object>> rawResults) {
+        List<Map<String, Object>> valid = new ArrayList<>();
+        if (rawResults == null) {
+            return valid;
+        }
+        for (Map<String, Object> row : rawResults) {
+            if (row == null) {
+                continue;
+            }
+            boolean hasValue = false;
+            for (Object value : row.values()) {
+                if (value != null) {
+                    hasValue = true;
+                    break;
+                }
+            }
+            if (hasValue) {
+                valid.add(row);
+            }
+        }
+        return valid;
+    }
+
+    /**
+     * 首次调用 LLM 根据用户问题和表结构生成 SELECT SQL
+     *
+     * @param question         用户问题
+     * @param schemaDescription 表结构描述（DDL + 列信息 + 表描述）
+     * @param ctx              流式会话上下文
+     * @return 生成的 SQL 语句
+     */
+    private String generateSql(String question, String schemaDescription, ChatStreamContext ctx) {
+        String promptContent = agentPromptService.getPromptContent(AgentType.RAG, PromptKey.TEXT2SQL_GENERATE);
+        if (promptContent == null) {
+            throw new RuntimeException("缺少 Text2SQL 生成提示词，请先执行 rag_prompt_init.sql 初始化 agent_prompt 表");
+        }
+        String userMessage = "## 表结构信息\n" + schemaDescription + "\n\n## 用户问题\n" + question;
+        String sql = callFastModel(promptContent, userMessage, ctx);
+        if (sql == null) {
+            throw new RuntimeException("LLM 未返回 SQL");
+        }
+        return cleanSqlOutput(sql);
+    }
+
+    /**
+     * 重试时调用 LLM，带上一次错误信息重新生成修正后的 SQL
+     *
+     * @param question         用户问题
+     * @param schemaDescription 表结构描述
+     * @param lastError        上次执行失败的错误信息
+     * @param ctx              流式会话上下文
+     * @return 修正后的 SQL 语句
+     */
+    private String regenerateSql(String question, String schemaDescription,
+                                  String lastError, ChatStreamContext ctx) {
+        String promptContent = agentPromptService.getPromptContent(AgentType.RAG, PromptKey.TEXT2SQL_VALIDATE);
+        if (promptContent == null) {
+            throw new RuntimeException("缺少 Text2SQL 校验反馈提示词，请先执行 rag_prompt_init.sql 初始化 agent_prompt 表");
+        }
+        String userMessage = "## 表结构信息\n" + schemaDescription
+                + "\n\n## 用户问题\n" + question
+                + "\n\n## 上次错误信息\n" + lastError;
+        String sql = callFastModel(promptContent, userMessage, ctx);
+        if (sql == null) {
+            throw new RuntimeException("LLM 未返回修正后的 SQL");
+        }
+        return cleanSqlOutput(sql);
+    }
+
+    /**
+     * 调用 LLM 校验 SQL 查询结果是否能有效回答用户问题
+     *
+     * @param question 用户原始问题
+     * @param results  SQL 查询结果
+     * @param ctx      流式会话上下文
+     * @return true 表示结果有效，false 表示结果不相关
+     */
+    private boolean checkSqlResults(String question, List<Map<String, Object>> results, ChatStreamContext ctx) {
+        try {
+            String promptContent = agentPromptService.getPromptContent(AgentType.RAG, PromptKey.TEXT2SQL_CHECK);
+            if (promptContent == null) {
+                throw new RuntimeException("缺少 Text2SQL 结果校验提示词，请先执行 rag_prompt_init.sql 初始化 agent_prompt 表");
+            }
+            // 构建结果摘要（最多取前 5 行作为采样，跳过 null 行）
+            StringBuilder sampleBuilder = new StringBuilder();
+            int sampleSize = Math.min(results.size(), 5);
+            for (int i = 0; i < sampleSize; i++) {
+                Map<String, Object> row = results.get(i);
+                sampleBuilder.append("行").append(i + 1).append(": ")
+                        .append(row == null ? "null" : row).append("\n");
+            }
+            if (results.size() > 5) {
+                sampleBuilder.append("... 共 ").append(results.size()).append(" 行\n");
+            }
+            String userMessage = "## 用户问题\n" + question
+                    + "\n\n## SQL 查询结果（采样）\n" + sampleBuilder;
+            String response = callFastModel(promptContent, userMessage, ctx);
+            if (response != null) {
+                response = response.trim();
+                if (response.startsWith("```")) {
+                    response = response.replaceAll("^```\\w*\\n?", "").replaceAll("\\n?```$", "").trim();
+                }
+                JSONObject checkResult = JSON.parseObject(response);
+                return checkResult != null && Boolean.TRUE.equals(checkResult.getBoolean("valid"));
+            }
+        } catch (Exception e) {
+            log.warn("Text2SQL 结果校验失败，默认视为有效: {}", e.getMessage());
+        }
+        // 校验失败时默认认为结果有效（避免不必要的重试）
+        return true;
+    }
+
+    /**
+     * 清理 LLM 输出的 SQL：去除 markdown 代码块标记、首尾空白和末尾分号
+     *
+     * @param sql LLM 原始输出
+     * @return 清理后的纯 SQL 语句
+     */
+    private String cleanSqlOutput(String sql) {
+        sql = sql.trim();
+        // 去除 markdown 代码块标记
+        if (sql.startsWith("```")) {
+            sql = sql.replaceAll("^```\\w*\\n?", "").replaceAll("\\n?```$", "").trim();
+        }
+        // 去除末尾分号
+        if (sql.endsWith(";")) {
+            sql = sql.substring(0, sql.length() - 1).trim();
+        }
+        return sql;
+    }
+
+    /**
+     * SQL 安全校验：确保只允许 SELECT 查询，禁止任何数据修改操作。
+     * 校验基于"去注释后的 SQL"（防止行注释 -- / # 与块注释绕过关键词与表名校验），
+     * 并校验 FROM/JOIN 引用的表名必须属于当前用户文档允许的白名单。
+     *
+     * @param sql           待校验的 SQL 语句
+     * @param allowedTables 允许查询的物理表名集合（小写）
+     * @return null 表示校验通过，非 null 返回错误描述
+     */
+    private String validateSqlSafety(String sql, Set<String> allowedTables) {
+        if (sql == null || sql.trim().isEmpty()) {
+            return "SQL 为空";
+        }
+        // 0. 去除 SQL 注释，防止通过注释绕过后续关键词/表名检查（如 IN/**/TO、SELE/**/CT）
+        String normalizedSql = stripSqlComments(sql).trim();
+        if (normalizedSql.isEmpty()) {
+            return "SQL 为空";
+        }
+
+        // 1. 首关键词必须是 SELECT（不区分大小写）
+        String upperSql = normalizedSql.toUpperCase();
+        if (!upperSql.startsWith("SELECT")) {
+            return "SQL 不是 SELECT 语句，禁止执行非查询操作";
+        }
+
+        // 2. 禁止多语句（包含未转义的分号分隔符）
+        if (normalizedSql.contains(";")) {
+            return "禁止执行多条 SQL 语句";
+        }
+
+        // 3. 禁止数据修改关键词（仅检查 SQL 主体中的独立关键词，避免误匹配列名如 drop_rate）
+        String[] dangerousKeywords = {
+                "INSERT ", "UPDATE ", "DELETE ", "DROP ", "ALTER ", "TRUNCATE ",
+                "CREATE ", "GRANT ", "REVOKE ", "REPLACE ", "RENAME ", "LOCK "
+        };
+        // 在 SQL 的 FROM/WHERE 等子句部分检查（跳过首词 SELECT）
+        String sqlBody = upperSql.substring(6); // 跳过 "SELECT"
+        for (String keyword : dangerousKeywords) {
+            // 使用空格或开头匹配，避免 "UPDATE" 匹配到 "UPDATED_AT" 等列名
+            if (sqlBody.contains(" " + keyword) || sqlBody.startsWith(keyword)) {
+                return "SQL 包含禁止的数据修改操作: " + keyword.trim();
+            }
+        }
+
+        // 4. 禁止危险函数 / 文件读写
+        String[] dangerousFunctions = {
+                "INTO OUTFILE", "INTO DUMPFILE", "LOAD_FILE", "BENCHMARK",
+                "SLEEP", "PG_SLEEP", "INTO"
+        };
+        for (String func : dangerousFunctions) {
+            if (upperSql.contains(func)) {
+                return "SQL 包含禁止的危险函数或语句: " + func;
+            }
+        }
+
+        // 5. 表名白名单：FROM/JOIN 引用的表必须属于当前用户文档的物理表
+        if (allowedTables != null && !allowedTables.isEmpty()) {
+            Set<String> referencedTables = extractTableNames(normalizedSql);
+            for (String table : referencedTables) {
+                if (!allowedTables.contains(table)) {
+                    return "SQL 引用了未授权的表: " + table + "（仅允许查询当前知识库对应的数据表）";
+                }
+            }
+        }
+
+        return null; // 校验通过
+    }
+
+    /**
+     * 去除 SQL 中的注释（块注释、行注释 -- 与 #），防止注释绕过关键词/表名校验
+     */
+    private String stripSqlComments(String sql) {
+        String s = sql.replaceAll("(?s)/\\*.*?\\*/", " ");
+        s = s.replaceAll("--[^\\r\\n]*", " ");
+        s = s.replaceAll("#[^\\r\\n]*", " ");
+        return s;
+    }
+
+    /**
+     * 提取 SQL 中 FROM/JOIN 引用的表名（支持反引号包裹），返回小写集合
+     */
+    private Set<String> extractTableNames(String sql) {
+        Set<String> tables = new HashSet<>();
+        Matcher m = Pattern.compile("(?:FROM|JOIN)\\s+`?([A-Za-z0-9_]+)`?",
+                Pattern.CASE_INSENSITIVE).matcher(sql);
+        while (m.find()) {
+            tables.add(m.group(1).toLowerCase());
+        }
+        return tables;
+    }
+
+    /**
+     * 判断 SQL 是否包含 FROM 子句。
+     * 真正的数据查询必然包含 FROM；若 LLM 返回的 SQL 不含 FROM（如 SELECT '...' AS notice），
+     * 说明其认为问题与表无关，应跳过查表。
+     */
+    private boolean containsFromClause(String sql) {
+        if (sql == null || sql.isBlank()) {
+            return false;
+        }
+        return Pattern.compile("\\bFROM\\b", Pattern.CASE_INSENSITIVE).matcher(sql).find();
+    }
+
+    /**
+     * 转义 LIKE 关键字中的通配符（% _ \），避免 BM25 检索时被当作通配符
+     */
+    private String escapeLikeKeyword(String keyword) {
+        return keyword.replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_");
+    }
+
+    /**
+     * 将私有 MinIO URL 转换为预签名公开 URL（用于前端展示参考来源），失败时原样返回
+     */
+    private String toPublicUrl(String url) {
+        if (fileStorageService == null || url == null || url.isBlank()) {
+            return url;
+        }
+        return fileStorageService.toPublicUrl(url);
+    }
+
+    /**
+     * 构建表结构描述字符串，用于 LLM 生成 SQL。
+     * 动态解析 columns_info 渲染成"物理列 → 含义 → 类型 → 示例值"的映射表，
+     * 并附上建表 DDL（含 COMMENT 语义）作为对照。适用于任意 DATA_QUERY 表，不写死任何字段。
+     *
+     * @param table 查询表信息
+     * @return 表结构描述文本
+     */
+    private String buildSchemaDescription(QueryTableInfo table) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("表名: `").append(table.tableName()).append("`\n");
+        if (table.description() != null && !table.description().isEmpty()) {
+            sb.append("表描述: ").append(table.description()).append("\n");
+        }
+        // 列映射表：物理列名通常无语义（如 col_1），必须依据【含义】和【示例值】选列
+        String columnMapping = renderColumnMapping(table.columnsInfoJson());
+        if (StringUtils.hasText(columnMapping)) {
+            sb.append("列映射:\n").append(columnMapping).append("\n");
+        }
+        if (table.createSql() != null) {
+            sb.append("建表语句(DDL):\n").append(table.createSql()).append("\n");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 解析 columns_info JSON，渲染成 markdown 列映射表。
+     * 兼容新旧两种字段：新字段 inferredType/formatHint/sampleValues，旧字段仅 columnName/originalHeader/dataType。
+     *
+     * @param columnsInfoJson 列信息 JSON 字符串
+     * @return markdown 表格；解析失败或为空时返回空串
+     */
+    private String renderColumnMapping(String columnsInfoJson) {
+        if (!StringUtils.hasText(columnsInfoJson)) {
+            return "";
+        }
+        try {
+            List<JSONObject> cols = JSON.parseArray(columnsInfoJson, JSONObject.class);
+            if (cols == null || cols.isEmpty()) {
+                return "";
+            }
+            StringBuilder sb = new StringBuilder();
+            sb.append("| 物理列名 | 含义 | 类型 | 示例值 |\n");
+            sb.append("| --- | --- | --- | --- |\n");
+            for (JSONObject col : cols) {
+                if (col == null) {
+                    continue;
+                }
+                String columnName = col.getString("columnName");
+                String meaning = col.getString("originalHeader");
+                String type = col.getString("inferredType");
+                if (!StringUtils.hasText(type)) {
+                    type = col.getString("dataType");
+                }
+                String formatHint = col.getString("formatHint");
+                String typeStr = StringUtils.hasText(type) ? type : "TEXT";
+                if (StringUtils.hasText(formatHint)) {
+                    typeStr = typeStr + "(" + formatHint + ")";
+                }
+                sb.append("| ").append(columnName == null ? "" : columnName)
+                        .append(" | ").append(meaning == null ? "" : meaning)
+                        .append(" | ").append(typeStr)
+                        .append(" | ").append(formatSamples(col.get("sampleValues")))
+                        .append(" |\n");
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            log.warn("解析列信息 JSON 失败: {}", e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * 将采样示例值（List/JSONArray）格式化为逗号分隔字符串
+     */
+    private String formatSamples(Object samplesObj) {
+        if (!(samplesObj instanceof java.util.List<?> list)) {
+            return "";
+        }
+        List<String> out = new ArrayList<>();
+        for (Object o : list) {
+            if (o != null) {
+                out.add(o.toString());
+            }
+        }
+        return String.join(", ", out);
+    }
+
+    /**
+     * 采样表的前 3 行真实数据，用于让 LLM 了解各列的值格式（日期、ID、名称等）。
+     * 失败时返回空列表（不阻断 Text2SQL 流程）。
+     */
+    private List<Map<String, Object>> fetchSampleRows(String tableName) {
+        try {
+            List<Map<String, Object>> rows = tableMetaMapper.executeQuery(
+                    "SELECT * FROM `" + tableName + "` LIMIT 3");
+            if (rows == null) {
+                return Collections.emptyList();
+            }
+            List<Map<String, Object>> valid = new ArrayList<>();
+            for (Map<String, Object> row : rows) {
+                if (row != null) {
+                    valid.add(row);
+                }
+            }
+            return valid;
+        } catch (Exception e) {
+            log.warn("采样表 {} 数据失败: {}", tableName, e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * 将采样行格式化为 markdown 表格（过滤系统字段，截断长值）
+     */
+    private String formatSampleRows(List<Map<String, Object>> rows) {
+        if (rows.isEmpty()) {
+            return "";
+        }
+        Set<String> skip = Set.of("id", "created_at", "updated_at");
+        List<String> headers = new ArrayList<>();
+        for (Map<String, Object> r : rows) {
+            if (r == null) {
+                continue;
+            }
+            for (String key : r.keySet()) {
+                if (!skip.contains(key.toLowerCase()) && !headers.contains(key)) {
+                    headers.add(key);
+                }
+            }
+            if (!headers.isEmpty()) {
+                break;
+            }
+        }
+        if (headers.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("| ").append(String.join(" | ", headers)).append(" |\n");
+        sb.append("| ").append(headers.stream().map(h -> "---").collect(Collectors.joining(" | "))).append(" |\n");
+        for (Map<String, Object> row : rows) {
+            if (row == null) {
+                continue;
+            }
+            sb.append("| ");
+            for (int i = 0; i < headers.size(); i++) {
+                if (i > 0) {
+                    sb.append(" | ");
+                }
+                Object value = row.get(headers.get(i));
+                String valueStr = value == null ? "" : value.toString();
+                if (valueStr.length() > 60) {
+                    valueStr = valueStr.substring(0, 60) + "...";
+                }
+                sb.append(valueStr);
+            }
+            sb.append(" |\n");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 将 SQL 查询结果格式化为上下文字符串，包含表头、数据表格和 SQL 语句
+     *
+     * @param table   查询表信息
+     * @param sql     执行的 SQL 语句
+     * @param results 查询结果（行 → 列名:值 的 Map 列表）
+     * @return 格式化的数据查询上下文
+     */
+    private String buildDataQueryContext(QueryTableInfo table, String sql, List<Map<String, Object>> results) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("[数据查询: ").append(table.docTitle());
+        if (table.description() != null) {
+            sb.append(" - ").append(table.description());
+        }
+        sb.append("]\n");
+        sb.append("执行SQL: ").append(sql).append("\n");
+        sb.append("查询结果（").append(results.size()).append("条）:\n\n");
+
+        if (!results.isEmpty()) {
+            // 收集列名（过滤掉系统字段 id, created_at, updated_at），并跳过 null 行
+            Set<String> skipColumns = Set.of("id", "created_at", "updated_at");
+            List<String> headers = new ArrayList<>();
+            for (Map<String, Object> r : results) {
+                if (r == null) {
+                    continue;
+                }
+                for (String key : r.keySet()) {
+                    if (!skipColumns.contains(key.toLowerCase()) && !headers.contains(key)) {
+                        headers.add(key);
+                    }
+                }
+                if (!headers.isEmpty()) {
+                    break;
+                }
+            }
+
+            if (!headers.isEmpty()) {
+                // Markdown 表头
+                sb.append("| ").append(String.join(" | ", headers)).append(" |\n");
+                sb.append("| ").append(headers.stream().map(h -> "---").collect(Collectors.joining(" | "))).append(" |\n");
+
+                // 数据行（最多展示 20 行，避免上下文过长）
+                int maxRows = Math.min(results.size(), 20);
+                for (int i = 0; i < maxRows; i++) {
+                    Map<String, Object> row = results.get(i);
+                    if (row == null) {
+                        continue;
+                    }
+                    sb.append("| ");
+                    for (int j = 0; j < headers.size(); j++) {
+                        if (j > 0) {
+                            sb.append(" | ");
+                        }
+                        Object value = row.get(headers.get(j));
+                        String valueStr = value != null ? value.toString() : "";
+                        // 截断过长的值
+                        if (valueStr.length() > 100) {
+                            valueStr = valueStr.substring(0, 100) + "...";
+                        }
+                        sb.append(valueStr);
+                    }
+                    sb.append(" |\n");
+                }
+
+                if (results.size() > maxRows) {
+                    sb.append("\n... 共 ").append(results.size()).append(" 条记录，仅展示前 ").append(maxRows).append(" 条\n");
+                }
+            }
+        }
+
+        return sb.toString();
+    }
+
     // ==================== 流式回答生成 ====================
 
     /**
@@ -860,6 +1734,8 @@ public class RagAgent extends BaseAgent {
                 .chatResponse()
                 .publishOn(Schedulers.boundedElastic())
                 .doOnNext(chunk -> {
+                    // 记录 token 使用量（流式 Usage 通常只在最后一个 chunk 出现，用 max 覆盖）
+                    ChatTokenUsageUtil.recordUsage(chunk, ctx.promptTokens, ctx.generationTokens);
                     if (chunk == null || chunk.getResult() == null || chunk.getResult().getOutput() == null) {
                         return;
                     }
@@ -912,15 +1788,17 @@ public class RagAgent extends BaseAgent {
             sink.tryEmitNext(referenceJson);
         }
 
-        // 生成并发送推荐问题
-        if (enableRecommendations) {
-            String recommendations = generateRecommendations(currentQuestion, finalText, messages);
-            if (recommendations != null) {
-                currentRecommendations = recommendations;
-                String recommendJson = createRecommendResponse(recommendations);
-                sink.tryEmitNext(recommendJson);
-            }
-        }
+        //Rag不生成推荐问题
+//        // 生成并发送推荐问题
+//        if (enableRecommendations) {
+//            String recommendations = generateRecommendations(currentQuestion, finalText, messages,
+//                    ctx.promptTokens, ctx.generationTokens);
+//            if (recommendations != null) {
+//                currentRecommendations = recommendations;
+//                String recommendJson = createRecommendResponse(recommendations);
+//                sink.tryEmitNext(recommendJson);
+//            }
+//        }
 
         // 标记已发送最终结果并发送结束标记
         ctx.hasSentFinalResult.set(true);
@@ -952,16 +1830,21 @@ public class RagAgent extends BaseAgent {
      * @param userMessage  用户消息
      * @return 模型响应内容
      */
-    private String callFastModel(String systemPrompt, String userMessage) {
+    private String callFastModel(String systemPrompt, String userMessage, ChatStreamContext ctx) {
         List<Message> messages = new ArrayList<>();
         messages.add(new SystemMessage(systemPrompt));
         messages.add(new UserMessage(userMessage));
-        return ChatClient.builder(chatModel)
+        ChatClientResponse response = ChatClient.builder(chatModel)
                 .build()
                 .prompt()
                 .messages(messages)
                 .call()
-                .content();
+                .chatClientResponse();
+        if (response == null || response.chatResponse() == null) {
+            return null;
+        }
+        ChatTokenUsageUtil.recordUsage(response.chatResponse(), ctx.promptTokens, ctx.generationTokens);
+        return response.chatResponse().getResult().getOutput().getText();
     }
 
     // ==================== 内部类 ====================
@@ -982,6 +1865,9 @@ public class RagAgent extends BaseAgent {
         final StringBuilder currentAnswerBuffer = new StringBuilder();
         // 参考来源列表（知识库检索、关键词检索的相关参考来源）
         final List<SearchResult> references = new ArrayList<>();
+        // Token 使用计数器
+        final AtomicLong promptTokens = new AtomicLong();
+        final AtomicLong generationTokens = new AtomicLong();
         // 提取的关键词列表
         List<String> keywords = Collections.emptyList();
         // 重写后的查询语句
@@ -1011,6 +1897,21 @@ public class RagAgent extends BaseAgent {
     }
 
     /**
+     * DATA_QUERY 数据查询表信息记录类
+     * 封装 DATA_QUERY 类型知识库文档对应的动态表元数据，用于 Text2SQL 流程
+     *
+     * @param docId          文档ID
+     * @param docTitle       文档标题
+     * @param description    文档/表描述（用于 LLM 理解表的业务含义）
+     * @param tableName      物理表名（dh_data_query_xxx）
+     * @param columnsInfoJson 列信息 JSON 字符串
+     * @param createSql      建表 DDL
+     */
+    record QueryTableInfo(Long docId, String docTitle, String description,
+                          String tableName, String columnsInfoJson, String createSql) {
+    }
+
+    /**
      * RagAgent的构建器
      * 提供链式API设置所有配置参数，最终通过build()方法创建Agent实例
      */
@@ -1024,6 +1925,10 @@ public class RagAgent extends BaseAgent {
         private KnowledgeDocumentService knowledgeDocumentService;
         // 知识片段服务
         private KnowledgeSegmentService knowledgeSegmentService;
+        // 表元数据 Mapper（用于 DATA_QUERY Text2SQL 查询）
+        private TableMetaMapper tableMetaMapper;
+        // 文件存储服务（用于预签名 URL 转换）
+        private FileStorageService fileStorageService;
         // 聊天会话服务
         private ChatConversationService chatConversationService;
         // 聊天消息服务
@@ -1032,6 +1937,8 @@ public class RagAgent extends BaseAgent {
         private AgentPromptService agentPromptService;
         // 任务管理器
         private AgentTaskManager taskManager;
+        // 每日 Token 限制服务
+        private ChatTokenLimitService chatTokenLimitService;
         // 向量检索每个知识库的topK，默认5
         private int vectorTopK = 5;
         // BM25检索返回的最大片段数，默认10
@@ -1072,6 +1979,22 @@ public class RagAgent extends BaseAgent {
         }
 
         /**
+         * 设置表元数据 Mapper（用于 DATA_QUERY Text2SQL 查询）
+         */
+        public Builder tableMetaMapper(TableMetaMapper tableMetaMapper) {
+            this.tableMetaMapper = tableMetaMapper;
+            return this;
+        }
+
+        /**
+         * 设置文件存储服务（用于预签名 URL 转换）
+         */
+        public Builder fileStorageService(FileStorageService fileStorageService) {
+            this.fileStorageService = fileStorageService;
+            return this;
+        }
+
+        /**
          * 设置聊天会话服务
          */
         public Builder chatConversationService(ChatConversationService chatConversationService) {
@@ -1100,6 +2023,14 @@ public class RagAgent extends BaseAgent {
          */
         public Builder taskManager(AgentTaskManager taskManager) {
             this.taskManager = taskManager;
+            return this;
+        }
+
+        /**
+         * 设置每日 Token 限制服务
+         */
+        public Builder chatTokenLimitService(ChatTokenLimitService chatTokenLimitService) {
+            this.chatTokenLimitService = chatTokenLimitService;
             return this;
         }
 

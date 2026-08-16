@@ -2,6 +2,7 @@ package cn.john.dh.assistant.rag.service.impl;
 
 import io.minio.*;
 import io.minio.http.Method;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -17,6 +18,7 @@ import java.util.concurrent.TimeUnit;
  * @Date 2026-07-31 15:38
  */
 @Service
+@Slf4j
 public class FileStorageService {
 
     @Autowired
@@ -48,7 +50,8 @@ public class FileStorageService {
 
     // 上传文件
     public String uploadFile(MultipartFile file, String objectName) throws Exception {
-        createBucketIfNotExists(true);// 这里可根据你自己的情况改成false，如果改成false，需要在这个方法最后调一次getPresignedUrl
+        // 私有 bucket：用户文档不应公开可读，外部访问一律走预签名 URL（toPublicUrl）
+        createBucketIfNotExists(false);
         minioClient.putObject(PutObjectArgs.builder()
                 .bucket(bucketName)
                 .object(objectName)
@@ -63,7 +66,7 @@ public class FileStorageService {
      * 上传文件
      */
     public String uploadFile(String objectName, byte[] content, String contentType) throws Exception {
-        createBucketIfNotExists(true);
+        createBucketIfNotExists(false);
         try (InputStream stream = new ByteArrayInputStream(content)) {
             minioClient.putObject(
                     PutObjectArgs.builder()
@@ -75,6 +78,29 @@ public class FileStorageService {
             );
 
             return String.format("%s/%s/%s", endpoint, bucketName, objectName);
+        }
+    }
+
+    /**
+     * 将私有 URL 转换为带签名的临时公开 URL（默认 7 天有效）。
+     * 用于前端展示图片、参考链接等场景；转换失败时原样返回 URL。
+     *
+     * @param url MinIO 私有 URL（{endpoint}/{bucket}/{objectName}）
+     * @return 预签名公开 URL
+     */
+    public String toPublicUrl(String url) {
+        if (url == null || url.isBlank()) {
+            return url;
+        }
+        try {
+            String objectName = extractObjectNameFromUrl(url);
+            if (objectName == null) {
+                return url;
+            }
+            return getPresignedUrl(objectName);
+        } catch (Exception e) {
+            log.warn("生成预签名URL失败，返回原URL: {}", url);
+            return url;
         }
     }
 

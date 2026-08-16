@@ -1,10 +1,12 @@
 package cn.john.dh.assistant.rag.strategy.service;
 
 import cn.john.dh.assistant.rag.domain.entity.KnowledgeDocument;
+import cn.john.dh.assistant.rag.domain.entity.KnowledgeDocumentVersion;
 import cn.john.dh.assistant.rag.domain.enums.DocumentStatus;
 import cn.john.dh.assistant.rag.domain.enums.FileType;
 import cn.john.dh.assistant.rag.domain.enums.KnowledgeBaseType;
 import cn.john.dh.assistant.rag.service.KnowledgeDocumentService;
+import cn.john.dh.assistant.rag.service.KnowledgeDocumentVersionService;
 import cn.john.dh.assistant.rag.service.impl.FileStorageService;
 import cn.john.dh.assistant.rag.strategy.FileProcessService;
 import lombok.extern.slf4j.Slf4j;
@@ -67,6 +69,9 @@ public class MinerUProcessBaseServiceImpl implements FileProcessService {
 
     @Autowired
     private FileStorageService fileStorageService;
+
+    @Autowired
+    private KnowledgeDocumentVersionService knowledgeDocumentVersionService;
 
     @Autowired
     @Lazy
@@ -140,10 +145,11 @@ public class MinerUProcessBaseServiceImpl implements FileProcessService {
             return mdMinioUrl;
         } catch (Exception e) {
             log.error("文档 ZIP 转换失败，documentId: {}", document.getDocTitle(), e);
-            // 转换失败，状态回滚为 UPLOADED
+            // 转换失败，状态回滚为 UPLOADED（文档与版本状态必须同步回滚，否则版本记录卡在 CONVERTING 导致无法切分）
             document.setStatus(DocumentStatus.UPLOADED);
             boolean result = knowledgeDocumentService.updateById(document);
             Assert.isTrue(result, "文件UPLOADED状态更新失败");
+            rollbackVersionStatus(document);
             throw new RuntimeException("文档 ZIP 转换失败: " + e.getMessage(), e);
         } finally {
             closeQuietly(inputStream);
@@ -187,15 +193,16 @@ public class MinerUProcessBaseServiceImpl implements FileProcessService {
         log.info("找到 Markdown 文件: {}, 图片文件数量: {}", mdFile, imageFiles.size());
         // 创建一个映射，存储图片上传地址
         Map<String, String> imageMap = new HashMap<>();
-        //指定MinIO对象存储路径
-        String baseObjectName = CONVERTED_FILE_DIR + document.getDocTitle() + "/";
+        // 指定MinIO对象存储路径（对象名带 docId 前缀，避免多用户同名文档互相覆盖）
+        String baseObjectName = CONVERTED_FILE_DIR + document.getDocId() + "/" + document.getDocTitle() + "/";
         for (Path imagePath : imageFiles) {
             String imageName = imagePath.getFileName().toString();
             byte[] imageBytes = Files.readAllBytes(imagePath);
             String contentType = getImageContentType(imageName);
             String objectName = baseObjectName + "images/" + imageName;
             String imageUrl = fileStorageService.uploadFile(objectName, imageBytes, contentType);
-            imageMap.put(imageName, imageUrl);
+            // 私有 bucket：存入 md 内容中的图片地址改为预签名 URL，保证前端可直接访问
+            imageMap.put(imageName, fileStorageService.toPublicUrl(imageUrl));
             log.info("图片已上传到 MinIO: {} -> {}", imageName, imageUrl);
         }
         // 读取 md 文件内容
@@ -378,6 +385,29 @@ public class MinerUProcessBaseServiceImpl implements FileProcessService {
             } catch (Exception ignored) {
                 // 忽略关闭异常
             }
+        }
+    }
+
+    /**
+     * 转换失败时回滚当前版本状态为 UPLOADED。
+     * <p>文档状态与版本状态必须同步回滚：若只回滚 document.status，
+     * 版本记录会卡在 CONVERTING，导致 split 阶段校验"状态不为已转换"永远失败，文档无法切分。</p>
+     *
+     * @param document 知识文档
+     */
+    protected void rollbackVersionStatus(KnowledgeDocument document) {
+        try {
+            if (document.getCurrentVersionId() == null) {
+                return;
+            }
+            KnowledgeDocumentVersion version = knowledgeDocumentVersionService.getById(document.getCurrentVersionId());
+            if (version != null && version.getStatus() == DocumentStatus.CONVERTING) {
+                version.setStatus(DocumentStatus.UPLOADED);
+                knowledgeDocumentVersionService.updateById(version);
+                log.info("版本状态已回滚为 UPLOADED, versionId={}", version.getId());
+            }
+        } catch (Exception ex) {
+            log.warn("版本状态回滚失败: docId={}", document.getDocId(), ex);
         }
     }
 

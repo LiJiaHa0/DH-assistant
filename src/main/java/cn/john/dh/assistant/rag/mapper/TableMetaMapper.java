@@ -37,6 +37,14 @@ public interface TableMetaMapper extends BaseMapper<TableMeta> {
     void executeInsert(@Param("sql") String sql);
 
     /**
+     * 执行动态SQL（清空/删除动态表数据，用于数据替换场景）
+     *
+     * @param sql DELETE 语句
+     */
+    @Update("${sql}")
+    int executeUpdate(@Param("sql") String sql);
+
+    /**
      * 查询动态表数据
      *
      * @param sql 查询SQL语句

@@ -15,7 +15,13 @@ public class DocumentSplitterFactory {
         return switch (param.splitType()) {
             case "LENGTH" -> new OverlapParagraphTextSplitter(param.chunkSize(), param.overlap());
             case "TITLE" -> new MarkdownHeaderParentTextSplitter(param.titleLevel(), param.chunkSize(), param.overlap());
-            case "SEPARATOR" -> new RecursiveCharacterTextSplitter(param.chunkSize(), new String[]{param.separator(), "\n\n", "\n"});
+            case "SEPARATOR" -> {
+                // separator 未传时兜底为换行，避免 null 元素导致切分器异常
+                String separator = (param.separator() == null || param.separator().isEmpty())
+                        ? "\n"
+                        : param.separator();
+                yield new RecursiveCharacterTextSplitter(param.chunkSize(), new String[]{separator, "\n\n", "\n"});
+            }
             case "REGEX" -> new RegexTextSplitter(param.regex(), param.chunkSize(), param.overlap());
             case "SMART" -> new MarkdownHeaderParentTextSplitter(param.titleLevel(),param.chunkSize(), (int) (param.chunkSize() * 0.1));
             default -> throw new IllegalArgumentException("不支持的切分方式: " + param.splitType());

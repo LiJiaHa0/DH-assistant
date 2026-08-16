@@ -1,5 +1,6 @@
 package cn.john.dh.assistant.agent.deepresearch;
 
+import cn.john.dh.assistant.chat.util.ChatTokenUsageUtil;
 import cn.john.dh.assistant.constant.AgentType;
 import cn.john.dh.assistant.constant.PromptKey;
 import cn.john.dh.assistant.prompt.service.AgentPromptService;
@@ -18,6 +19,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiConsumer;
 
 /**
@@ -40,6 +42,10 @@ public class SimpleReactAgent {
 
     private AgentPromptService agentPromptService;
 
+    // 外部传入的 token 计数器（与 PlanExecuteContext 共享）
+    private AtomicLong promptTokens;
+    private AtomicLong generationTokens;
+
     // 工具执行结果监听器，参数为(工具名称, 执行结果)，供外部收集搜索结果等信息
     private BiConsumer<String, String> toolResultListener;
 
@@ -50,9 +56,10 @@ public class SimpleReactAgent {
     private static final int TOOL_MAX_ATTEMPTS = 3;
 
 
-    public SimpleReactAgent(ChatModel chatModel, ToolCallback[] toolCallback,String systemPrompt,
+    public SimpleReactAgent(ChatModel chatModel, ToolCallback[] toolCallback, String systemPrompt,
                             ChatClient chatClient, int maxRound, AgentPromptService agentPromptService,
-                            BiConsumer<String, String> toolResultListener) {
+                            BiConsumer<String, String> toolResultListener,
+                            AtomicLong promptTokens, AtomicLong generationTokens) {
         this.chatModel = chatModel;
         this.toolCallback = toolCallback;
         this.systemPrompt = systemPrompt;
@@ -60,6 +67,8 @@ public class SimpleReactAgent {
         this.maxRound = maxRound;
         this.agentPromptService = agentPromptService;
         this.toolResultListener = toolResultListener;
+        this.promptTokens = promptTokens;
+        this.generationTokens = generationTokens;
         initChatClient();
         if (this.chatClient == null) { // 校验ChatClient初始化是否成功
             throw new IllegalStateException("ChatClient 初始化失败！"); // 初始化失败时抛出异常
@@ -83,6 +92,15 @@ public class SimpleReactAgent {
                     .build(); // 构建ChatClient实例
         } catch (Exception e) {
             throw new RuntimeException("ChatClient 初始化失败：" + e.getMessage(), e); // 初始化失败时抛出运行时异常
+        }
+    }
+
+    /**
+     * 记录 token 使用量到外部计数器
+     */
+    private void recordUsage(org.springframework.ai.chat.model.ChatResponse response) {
+        if (promptTokens != null && generationTokens != null && response != null) {
+            ChatTokenUsageUtil.recordUsage(response, promptTokens, generationTokens);
         }
     }
 
@@ -126,9 +144,12 @@ public class SimpleReactAgent {
                         禁止再调用任何工具。
                         如果信息不完整，请合理总结和说明。
                         """));
-                // 同步调用获取最终答案
-                String finalText = chatClient.prompt().messages(messages).call().content();
-                // 返回强制生成的最终答案
+                // 同步调用获取最终答案（使用 chatClientResponse 以暴露 Usage）
+                ChatClientResponse finalResponse = chatClient.prompt().messages(messages).call().chatClientResponse();
+                // 记录 token 使用量
+                recordUsage(finalResponse.chatResponse());
+                // 提取并返回强制生成的最终答案
+                String finalText = finalResponse.chatResponse().getResult().getOutput().getText();
                 return finalText;
             }
             // 调用LLM获取响应
@@ -137,6 +158,8 @@ public class SimpleReactAgent {
                     .messages(messages) // 设置消息列表
                     .call() // 执行同步调用
                     .chatClientResponse(); // 获取客户端响应
+            // 记录 token 使用量
+            recordUsage(chatResponse.chatResponse());
             // 提取AI回复文本
             String aiText = chatResponse.chatResponse().getResult().getOutput().getText();
             // 构建助手消息
@@ -270,6 +293,9 @@ public class SimpleReactAgent {
         private int maxRound;
         private AgentPromptService agentPromptService;
         private BiConsumer<String, String> toolResultListener;
+        // 外部传入的 token 计数器（与 PlanExecuteContext 共享）
+        private AtomicLong promptTokens;
+        private AtomicLong generationTokens;
 
         public Builder chatModel(ChatModel chatModel) {
             this.chatModel = chatModel;
@@ -320,11 +346,27 @@ public class SimpleReactAgent {
             return this;
         }
 
+        /**
+         * 设置外部 prompt token 计数器（共享计数）
+         */
+        public Builder promptTokens(AtomicLong promptTokens) {
+            this.promptTokens = promptTokens;
+            return this;
+        }
+
+        /**
+         * 设置外部 generation token 计数器（共享计数）
+         */
+        public Builder generationTokens(AtomicLong generationTokens) {
+            this.generationTokens = generationTokens;
+            return this;
+        }
+
         public SimpleReactAgent build() {
             if (chatModel == null) { // 校验聊天模型
                 throw new IllegalArgumentException("chatModel 不能为空！"); // 抛出异常
             }
-            return new SimpleReactAgent(chatModel, tools, systemPrompt,  chatClient, maxRound, agentPromptService, toolResultListener);
+            return new SimpleReactAgent(chatModel, tools, systemPrompt, chatClient, maxRound, agentPromptService, toolResultListener, promptTokens, generationTokens);
         }
     }
 

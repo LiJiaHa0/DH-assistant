@@ -1,5 +1,6 @@
 package cn.john.dh.assistant.rag.strategy.service;
 
+import cn.john.dh.assistant.constant.DataQueryConstant;
 import cn.john.dh.assistant.rag.domain.entity.KnowledgeDocument;
 import cn.john.dh.assistant.rag.domain.entity.TableMeta;
 import cn.john.dh.assistant.rag.domain.enums.FileType;
@@ -24,6 +25,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -34,8 +36,8 @@ import java.util.stream.Collectors;
 @Slf4j
 public class ExcelProcessServiceImpl implements FileProcessService {
 
-    // 表名前缀
-    private static final String TABLE_PREFIX = "dh_data_query_";
+    // 表名前缀（统一从 DataQueryConstant 提取）
+    private static final String TABLE_PREFIX = DataQueryConstant.TABLE_PREFIX;
 
     @Autowired
     private TableMetaMapper tableMetaMapper;
@@ -69,6 +71,8 @@ public class ExcelProcessServiceImpl implements FileProcessService {
             log.info("Excel文件表头: {}", headers);
             //生成列信息
             List<ColumnInfo> columns = generateColumnInfo(headers);
+            //对每一列做数据画像（类型推断 + 日期格式识别 + 值采样），供 Text2SQL 渲染给 LLM
+            inferColumnProfiles(columns, excelData);
             //判断表是否已存在
             boolean tableExists = tableMetaMapper.checkTableExists(tableName) > 0;
             if (tableExists) {
@@ -92,6 +96,12 @@ public class ExcelProcessServiceImpl implements FileProcessService {
 
     /**
      * 如果表存在相关逻辑
+     * <p>修复点：
+     * 1. 原实现"先 physicalDeleteByTableName 再 updateById(existingMeta)"更新的是已删除行，
+     *    必然更新 0 行导致"表元数据更新失败"，且物理表旧数据从未被清空（新旧数据叠加）；
+     * 2. 旧元数据可能已被逻辑删除（删除文档后重传同名表），此时 selectOne 查不到，
+     *    按新表处理（跳过结构校验）。</p>
+     *
      * @param tableName
      * @param excelData
      * @param columns
@@ -102,28 +112,28 @@ public class ExcelProcessServiceImpl implements FileProcessService {
         TableMeta existingMeta = tableMetaMapper.selectOne(
                 new LambdaQueryWrapper<TableMeta>()
                         .eq(TableMeta::getTableName, tableName));
-        BusinessExceptionUtils.throwBusinessException(Objects.isNull(existingMeta),"表 " + tableName + " 的元数据不存在");
-        // 解析已存在的表结构
-        List<ColumnInfo> existingColumns = parseColumnInfo(existingMeta.getColumnsInfo());
-        BusinessExceptionUtils.throwBusinessException(!isSchemaCompatible(existingColumns, columns), "Excel 表结构与已有表 " + tableName + " 不一致，禁止上传。请保持表头、列名、顺序及类型完全一致。");
-        log.info("表 {} 已存在且结构一致，执行数据替换", tableName);
-        // 删除现有表数据
-        tableMetaMapper.physicalDeleteByTableName(tableName);
+        if (existingMeta != null) {
+            // 解析已存在的表结构
+            List<ColumnInfo> existingColumns = parseColumnInfo(existingMeta.getColumnsInfo());
+            BusinessExceptionUtils.throwBusinessException(!isSchemaCompatible(existingColumns, columns), "Excel 表结构与已有表 " + tableName + " 不一致，禁止上传。请保持表头、列名、顺序及类型完全一致。");
+        }
+        log.info("表 {} 已存在，执行数据替换", tableName);
+        // 1. 清空物理表旧数据（原实现遗漏，导致新旧数据叠加）
+        tableMetaMapper.executeUpdate("DELETE FROM `" + tableName + "`");
         log.info("表 {} 旧数据已清空", tableName);
-        // 截取除表头以外的数据行
+        // 2. 物理删除旧元数据（含逻辑删除残留），随后重建，避免软删记录与新建记录并存
+        tableMetaMapper.physicalDeleteByTableName(tableName);
+        // 3. 截取除表头以外的数据行
         List<List<String>> dataRows = excelData.subList(1, excelData.size());
         int insertedCount = insertData(tableName, columns, dataRows);
         log.info("表 {} 数据替换完成，新数据 {} 行", tableName, insertedCount);
-        //更新元数据中的版本绑定为当前版本
-        existingMeta.setVersionId(document.getCurrentVersionId());
-        existingMeta.setDescription(document.getDescription() != null ? document.getDescription() : "从Excel导入: " + document.getDocTitle());
-        existingMeta.setUpdatedAt(LocalDateTime.now());
-        boolean updateResult = tableMetaMapper.updateById(existingMeta) > 0;
-        BusinessExceptionUtils.throwBusinessException(!updateResult, "表元数据更新失败");
+        // 4. 重建元数据，绑定当前版本
+        insertTableMeta(tableName, document, columns);
     }
 
     /**
      * 如果表不存在相关逻辑
+     *
      * @param tableName
      * @param excelData
      * @param columns
@@ -138,10 +148,21 @@ public class ExcelProcessServiceImpl implements FileProcessService {
         List<List<String>> dataRows = excelData.subList(1, excelData.size());
         int insertedCount = insertData(tableName, columns, dataRows);
         log.info("插入数据 {} 行", insertedCount);
+        insertTableMeta(tableName, document, columns);
+    }
+
+    /**
+     * 插入表元数据（绑定当前文档版本）
+     *
+     * @param tableName 物理表名
+     * @param document  知识文档
+     * @param columns   列信息
+     */
+    private void insertTableMeta(String tableName, KnowledgeDocument document, List<ColumnInfo> columns) {
         TableMeta tableMeta = new TableMeta();
         tableMeta.setTableName(tableName);
         tableMeta.setDescription(document.getDescription() != null ? document.getDescription() : "从Excel导入: " + document.getDocTitle());
-        tableMeta.setCreateSql(createTableSql);
+        tableMeta.setCreateSql(generateCreateTableSql(tableName, document.getDescription(), columns));
         tableMeta.setColumnsInfo(JSON.toJSONString(columns));
         tableMeta.setVersionId(document.getCurrentVersionId());
         tableMeta.setCreatedAt(LocalDateTime.now());
@@ -149,7 +170,6 @@ public class ExcelProcessServiceImpl implements FileProcessService {
         int result = tableMetaMapper.insert(tableMeta);
         Assert.isTrue(result == 1, "表元数据保存失败");
         log.info("表元数据保存成功, ID: {}", tableMeta.getId());
-
     }
 
     /**
@@ -177,7 +197,7 @@ public class ExcelProcessServiceImpl implements FileProcessService {
 
         // 设置主键
         sql.append("  PRIMARY KEY (`id`)\n");
-        sql.append(") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='" + description + "'");
+        sql.append(") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='" + escapeSqlComment(description) + "'");
 
         return sql.toString();
     }
@@ -250,13 +270,16 @@ public class ExcelProcessServiceImpl implements FileProcessService {
     }
 
     /**
-     * 转义SQL注释中的特殊字符
+     * 转义SQL注释中的特殊字符（先转义反斜杠，再转义单引号，并移除换行防止破坏语句）
      */
     private String escapeSqlComment(String comment) {
         if (comment == null) {
             return "";
         }
-        return comment.replace("'", "\\'").replace("\\", "\\\\");
+        return comment.replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace("\n", " ")
+                .replace("\r", " ");
     }
 
     /**
@@ -328,6 +351,113 @@ public class ExcelProcessServiceImpl implements FileProcessService {
         }
 
         return columns;
+    }
+
+    // ==================== 列数据画像（Text2SQL 准确率提升） ====================
+
+    private static final Pattern INTEGER_PATTERN = Pattern.compile("^-?\\d+$");
+    private static final Pattern DECIMAL_PATTERN = Pattern.compile("^-?\\d+(\\.\\d+)?$");
+    private static final Pattern DATE_SLASH_PATTERN = Pattern.compile("^\\d{4}/\\d{1,2}/\\d{1,2}$");
+    private static final Pattern DATE_DASH_PATTERN = Pattern.compile("^\\d{4}-\\d{1,2}-\\d{1,2}$");
+    private static final Pattern DATE_DOT_PATTERN = Pattern.compile("^\\d{4}\\.\\d{1,2}\\.\\d{1,2}$");
+    private static final Pattern DATE_CN_PATTERN = Pattern.compile("^\\d{4}年\\d{1,2}月\\d{1,2}日$");
+
+    /**
+     * 对每一列做数据画像，结果写入 columns_info，供 Text2SQL 阶段动态渲染给 LLM：
+     * 1. 推断语义类型（INTEGER / DECIMAL / DATE / TEXT）
+     * 2. 识别日期格式（formatHint，如 "YYYY/M/D"）
+     * 3. 采样最多 3 个去重非空示例值（sampleValues）
+     * <p>
+     * 注意：物理列仍统一为 TEXT（不随语义类型改 DDL），避免数值溢出、前导零丢失、
+     * 日期解析失败等风险；CAST / STR_TO_DATE 由 LLM 依据类型与示例格式正确书写。
+     *
+     * @param columns   列信息（原地填充 inferredType / formatHint / sampleValues）
+     * @param excelData Excel 全量内容（首行为表头）
+     */
+    private void inferColumnProfiles(List<ColumnInfo> columns, List<List<String>> excelData) {
+        List<List<String>> dataRows = excelData.size() > 1
+                ? excelData.subList(1, excelData.size()) : Collections.emptyList();
+        for (int c = 0; c < columns.size(); c++) {
+            ColumnInfo column = columns.get(c);
+            // 收集该列所有非空值
+            List<String> values = new ArrayList<>();
+            for (List<String> row : dataRows) {
+                if (c < row.size() && row.get(c) != null && !row.get(c).trim().isEmpty()) {
+                    values.add(row.get(c).trim());
+                }
+            }
+            // 采样去重（最多 3 个，单个截断到 50 字符）
+            List<String> samples = new ArrayList<>();
+            Set<String> seen = new HashSet<>();
+            for (String v : values) {
+                if (seen.add(v)) {
+                    samples.add(v.length() > 50 ? v.substring(0, 50) : v);
+                    if (samples.size() >= 3) {
+                        break;
+                    }
+                }
+            }
+            column.setSampleValues(samples);
+
+            // 类型推断（保守：所有非空值都匹配才归类，否则回退 TEXT）
+            String inferredType = "TEXT";
+            String formatHint = null;
+            if (!values.isEmpty() && !isIdentifierHeader(column.getOriginalHeader())) {
+                if (isAllMatch(values, INTEGER_PATTERN)) {
+                    inferredType = "INTEGER";
+                } else if (isAllMatch(values, DECIMAL_PATTERN)) {
+                    inferredType = "DECIMAL";
+                } else {
+                    String[] date = detectDateType(values);
+                    if (date != null) {
+                        inferredType = "DATE";
+                        formatHint = date[1];
+                    }
+                }
+            }
+            column.setInferredType(inferredType);
+            column.setFormatHint(formatHint);
+        }
+    }
+
+    private boolean isAllMatch(List<String> values, Pattern pattern) {
+        for (String v : values) {
+            if (!pattern.matcher(v).matches()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 检测是否为日期列，返回 [类型, 格式提示]；非日期返回 null。
+     */
+    private String[] detectDateType(List<String> values) {
+        if (isAllMatch(values, DATE_SLASH_PATTERN)) {
+            return new String[]{"DATE", "YYYY/M/D"};
+        }
+        if (isAllMatch(values, DATE_DASH_PATTERN)) {
+            return new String[]{"DATE", "YYYY-M-D"};
+        }
+        if (isAllMatch(values, DATE_DOT_PATTERN)) {
+            return new String[]{"DATE", "YYYY.M.D"};
+        }
+        if (isAllMatch(values, DATE_CN_PATTERN)) {
+            return new String[]{"DATE", "YYYY年M月D日"};
+        }
+        return null;
+    }
+
+    /**
+     * 判断列是否为标识类（ID/编号/码/号），此类列即使全是数字也保持 TEXT，
+     * 避免前导零丢失或超出 BIGINT 范围。
+     */
+    private boolean isIdentifierHeader(String header) {
+        if (header == null) {
+            return false;
+        }
+        String h = header.toLowerCase();
+        return h.contains("id") || h.contains("编号") || h.contains("码") || h.contains("号");
     }
 
     /**
@@ -464,8 +594,14 @@ public class ExcelProcessServiceImpl implements FileProcessService {
         private String originalHeader;
         // 列名
         private String columnName;
-        // 列数据类型
+        // 列数据类型（物理类型，统一 TEXT）
         private String dataType;
+        // 语义类型（INTEGER / DECIMAL / DATE / TEXT），供 LLM 理解列用途
+        private String inferredType;
+        // 日期格式提示（如 "YYYY/M/D"），仅日期列有值
+        private String formatHint;
+        // 采样示例值（最多 3 个去重非空值），供 LLM 了解值格式
+        private List<String> sampleValues;
 
         public int getIndex() {
             return index;
@@ -497,6 +633,30 @@ public class ExcelProcessServiceImpl implements FileProcessService {
 
         public void setDataType(String dataType) {
             this.dataType = dataType;
+        }
+
+        public String getInferredType() {
+            return inferredType;
+        }
+
+        public void setInferredType(String inferredType) {
+            this.inferredType = inferredType;
+        }
+
+        public String getFormatHint() {
+            return formatHint;
+        }
+
+        public void setFormatHint(String formatHint) {
+            this.formatHint = formatHint;
+        }
+
+        public List<String> getSampleValues() {
+            return sampleValues;
+        }
+
+        public void setSampleValues(List<String> sampleValues) {
+            this.sampleValues = sampleValues;
         }
     }
 }
