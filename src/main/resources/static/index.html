@@ -7,6 +7,8 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>DH Assistant - 智能助手</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/png" href="favicon.png">
     <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -644,6 +646,53 @@
         .tool-toggle.active {
             background: rgba(102, 126, 234, 0.12);
             border-color: var(--primary);
+        }
+
+        .web-search-prompt-card {
+            background: #f8f9ff;
+            border: 1px solid rgba(102, 126, 234, 0.3);
+            border-radius: 12px;
+            padding: 14px 18px;
+            margin-top: 10px;
+        }
+
+        .web-search-prompt-card p {
+            margin: 0 0 12px 0;
+            color: #333;
+            font-size: 14px;
+        }
+
+        .web-search-prompt-card .btn-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        .web-search-prompt-card button {
+            padding: 7px 18px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .web-search-prompt-card .btn-accept {
+            background: var(--primary);
+            color: white;
+        }
+
+        .web-search-prompt-card .btn-accept:hover {
+            opacity: 0.85;
+        }
+
+        .web-search-prompt-card .btn-decline {
+            background: #e9ecef;
+            color: #666;
+        }
+
+        .web-search-prompt-card .btn-decline:hover {
+            background: #dee2e6;
         }
 
         .toolbar-right {
@@ -1332,43 +1381,53 @@
         <!-- 项目介绍页 -->
         <section class="page-section intro-page" id="page-intro">
             <h2>欢迎使用 DH Assistant</h2>
-            <p class="intro-subtitle">基于 AI 的深度研究智能助手</p>
+            <p class="intro-subtitle">集联网搜索、深度研究与知识库问答于一体的 AI 智能助手</p>
 
             <div class="intro-card">
                 <h3>📌 项目简介</h3>
-                <p>DH Assistant 是一款集联网搜索与深度研究于一体的 AI 智能助手。用户通过自然语言提问，AI 自主调用搜索工具、规划研究方案、多轮迭代执行并生成结构化报告，全程实时流式推送思考过程与参考来源，让 AI 的推理透明可见。</p>
+                <p>DH Assistant 是一款基于 Spring AI 与阿里云通义千问大模型构建的智能助手，集联网搜索、深度研究与知识库问答（RAG）于一体。用户通过自然语言提问，AI 可自主调用 Tavily 搜索工具检索网络信息、按「计划-执行」架构多轮迭代完成深度研究，或从私有知识库中检索并生成答案，全程通过 SSE 实时流式推送思考过程、参考来源与推荐问题，让 AI 的推理透明可见。系统还提供多用户注册登录与数据隔离、会话持久化与多轮记忆、知识文档全生命周期管理以及每日 Token 限额等能力。</p>
             </div>
 
             <div class="intro-card">
                 <h3>✨ 核心功能</h3>
                 <ul class="feature-list">
-                    <li><span class="dot"></span>联网搜索 — 基于 Tavily MCP 实时检索网络信息，React Agent 自主决策搜索策略</li>
-                    <li><span class="dot"></span>深度研究 — Plan-Execute 架构，需求澄清 → 生成研究计划 → 并发执行任务 → 评审迭代 → 生成最终报告</li>
-                    <li><span class="dot"></span>流式输出 — SSE 实时推送思考过程、搜索结果、参考来源与推荐问题，打字机效果逐字呈现</li>
-                    <li><span class="dot"></span>会话管理 — 对话历史持久化存储，支持多轮上下文记忆与随时回看</li>
-                    <li><span class="dot"></span>用户认证 — 注册登录，Sa-Token 会话隔离，多用户数据互不干扰</li>
+                    <li><span class="dot"></span>联网搜索 — 通过 Tavily MCP 集成搜索引擎，ReAct（推理 + 行动）Agent 自主决策搜索策略，实时检索网络信息并引用来源</li>
+                    <li><span class="dot"></span>深度研究 — Plan-Execute 架构：需求澄清 → 生成研究计划 → 并发执行子任务 → 评审迭代（最多 3 轮）→ 生成结构化研究报告</li>
+                    <li><span class="dot"></span>知识库问答（RAG）— 支持「文档检索」与「数据查询」两类知识库：文档检索采用向量检索 + BM25 关键词检索 + RRF 融合排序；数据查询通过 Text2SQL 生成、校验并执行 SQL 查询</li>
+                    <li><span class="dot"></span>知识文档管理 — 支持 PDF / Word / Markdown / Excel 等文档上传，自动完成解析 → 分块 → 向量化 → 入库；支持文档列表、编辑、删除、批量删除、版本管理、分段查看与编辑、数据预览</li>
+                    <li><span class="dot"></span>流式输出 — SSE 实时推送思考过程、正文、参考来源与推荐问题，前端打字机式逐字呈现，支持中途停止生成</li>
+                    <li><span class="dot"></span>会话管理 — 对话历史持久化存储，支持多轮上下文记忆、会话创建、切换、回看与删除</li>
+                    <li><span class="dot"></span>用户认证 — 注册登录（BCrypt 密码加密）、Sa-Token 会话鉴权，多用户会话与知识文档数据相互隔离</li>
                 </ul>
             </div>
 
             <div class="intro-card">
                 <h3>🛠 技术栈</h3>
                 <div class="tech-tags">
-                    <span class="tag">Spring Boot 4.x</span>
-                    <span class="tag">Spring AI</span>
-                    <span class="tag">DashScope (Qwen)</span>
+                    <span class="tag">Spring Boot 3.5.6</span>
+                    <span class="tag">Java 21</span>
+                    <span class="tag">Spring AI 1.1.0</span>
+                    <span class="tag">Spring AI Alibaba</span>
+                    <span class="tag">通义千问 Qwen</span>
+                    <span class="tag">DashScope Embedding</span>
                     <span class="tag">Tavily MCP</span>
+                    <span class="tag">Ollama</span>
                     <span class="tag">MyBatis-Plus</span>
                     <span class="tag">Sa-Token</span>
                     <span class="tag">MySQL</span>
                     <span class="tag">Redis</span>
-                    <span class="tag">Reactor SSE</span>
+                    <span class="tag">Milvus</span>
+                    <span class="tag">MinIO</span>
                     <span class="tag">Druid</span>
+                    <span class="tag">Apache Tika</span>
+                    <span class="tag">EasyExcel</span>
+                    <span class="tag">SSE（Reactor）</span>
                 </div>
             </div>
 
             <div class="intro-card">
                 <h3>🚀 快速开始</h3>
-                <p>点击顶部导航栏中的 <strong>"聊天"</strong> 进入对话页面，在输入框下方切换 <strong>联网</strong> 或 <strong>深度思考</strong> 模式（两者互斥），输入问题即可开始。</p>
+                <p>点击顶部导航栏中的 <strong>「聊天」</strong> 进入对话页面，在输入框下方通过 <strong>「联网」</strong>、<strong>「深度思考」</strong>、<strong>「知识库」</strong> 三个开关切换能力（其中「深度思考」与「知识库」互斥，「联网」可与两者组合）。如需基于私有知识问答，请先在 <strong>「RAG知识文档」</strong> 页上传文档并等待完成向量化，再回到聊天页开启「知识库」提问。输入问题后回车发送，生成过程中可点击发送按钮停止。</p>
             </div>
         </section>
 
@@ -1900,6 +1959,7 @@
     let currentBotText = '';  // 流式正文Markdown原始文本缓冲区
     let streamCompleted = false;
     let receivedChunks = 0;
+    let currentQuestion = ''; // 当前用户问题（用于联网搜索回退）
 
     // 更新会话数量徽章
     function updateConvBadge() {
@@ -2088,21 +2148,25 @@
         this.style.height = Math.min(this.scrollHeight, maxH) + 'px';
     });
 
-    // 工具切换按钮（互斥：联网、深度思考、知识库只能选中一个）
+    // 工具切换按钮（联网可与深度思考或知识库共同选择，但深度思考和知识库不能共同选择）
     document.getElementById('searchToggle').addEventListener('click', function() {
-        this.classList.add('active');
-        document.getElementById('deepThinkToggle').classList.remove('active');
-        document.getElementById('ragToggle').classList.remove('active');
+        this.classList.toggle('active');
     });
     document.getElementById('deepThinkToggle').addEventListener('click', function() {
-        this.classList.add('active');
-        document.getElementById('searchToggle').classList.remove('active');
-        document.getElementById('ragToggle').classList.remove('active');
+        const wasActive = this.classList.contains('active');
+        this.classList.toggle('active');
+        if (!wasActive) {
+            // 深度思考激活时，取消知识库（互斥）
+            document.getElementById('ragToggle').classList.remove('active');
+        }
     });
     document.getElementById('ragToggle').addEventListener('click', function() {
-        this.classList.add('active');
-        document.getElementById('searchToggle').classList.remove('active');
-        document.getElementById('deepThinkToggle').classList.remove('active');
+        const wasActive = this.classList.contains('active');
+        this.classList.toggle('active');
+        if (!wasActive) {
+            // 知识库激活时，取消深度思考（互斥）
+            document.getElementById('deepThinkToggle').classList.remove('active');
+        }
     });
 
     // 知识库快捷提问：自动切换到知识库模式并发送
@@ -2152,6 +2216,9 @@
         input.value = '';
         input.style.height = 'auto';
 
+        // 保存当前问题，用于联网搜索回退
+        currentQuestion = text;
+
         isSending = true;
         currentThinkingText = '';
         currentBotText = '';
@@ -2162,12 +2229,26 @@
 
         const typingEl = appendTyping();
 
-        // 根据工具开关选择接口：深度思考走深度研究接口，知识库走RAG接口，否则走普通搜索接口
+        // 根据工具开关选择接口
         const deepThinkOn = document.getElementById('deepThinkToggle').classList.contains('active');
         const ragOn = document.getElementById('ragToggle').classList.contains('active');
-        const streamPath = deepThinkOn ? '/agent/deep/stream' : (ragOn ? '/agent/rag/stream' : '/agent/chat/stream');
+        const searchOn = document.getElementById('searchToggle').classList.contains('active');
+
+        let streamPath, extraParams = '';
+        if (deepThinkOn) {
+            streamPath = '/agent/deep/stream';
+        } else if (ragOn) {
+            streamPath = '/agent/rag/stream';
+            // RAG模式下如果同时开启联网搜索，RAG无结果时提示用户是否联网
+            if (searchOn) {
+                extraParams = '&enableWebSearchFallback=true';
+            }
+        } else {
+            streamPath = '/agent/chat/stream';
+        }
         const url = streamPath + '?query=' + encodeURIComponent(text)
-                  + '&conversationId=' + (isTempConversation() ? '' : encodeURIComponent(currentConvId));
+                  + '&conversationId=' + (isTempConversation() ? '' : encodeURIComponent(currentConvId))
+                  + extraParams;
         const es = new EventSource(url);
         currentEventSource = es;
 
@@ -2200,6 +2281,9 @@
                         break;
                     case 'error':
                         handleStreamError(data.content || '服务异常');
+                        break;
+                    case 'web_search_prompt':
+                        handleWebSearchPrompt(data.content, data.data);
                         break;
                 }
             } catch (e) {
@@ -2239,6 +2323,121 @@
                 loadConversationsThenSelectFirst();
             }
         }
+    }
+
+    // 处理联网搜索确认提示（Human in the Loop）
+    function handleWebSearchPrompt(content, question) {
+        const wrapper = ensureBotMessage();
+        // 移除可能存在的 typing 指示器
+        const typing = wrapper.parentNode.querySelector('.typing-indicator');
+        if (typing) typing.remove();
+
+        const card = document.createElement('div');
+        card.className = 'web-search-prompt-card';
+        card.innerHTML = '<p>' + (content || '知识库中未检索到相关内容，是否允许使用联网搜索来查找答案？') + '</p>'
+            + '<div class="btn-group">'
+            + '<button class="btn-accept" onclick="acceptWebSearch(this)">\ud83c\udf10 同意联网搜索</button>'
+            + '<button class="btn-decline" onclick="declineWebSearch(this)">不同意</button>'
+            + '</div>';
+        card.dataset.question = question || currentQuestion;
+        wrapper.appendChild(card);
+        scrollChatToBottom();
+    }
+
+    // 用户同意联网搜索
+    function acceptWebSearch(btn) {
+        const card = btn.closest('.web-search-prompt-card');
+        const question = card.dataset.question;
+        card.remove();
+
+        // 关闭当前 RAG 流
+        if (currentEventSource) {
+            currentEventSource.close();
+            currentEventSource = null;
+        }
+        isSending = false;
+
+        // 启动联网搜索
+        startWebSearchFallback(question);
+    }
+
+    // 用户不同意联网搜索
+    function declineWebSearch(btn) {
+        const card = btn.closest('.web-search-prompt-card');
+        card.remove();
+
+        // 显示提示信息并结束
+        handleTextChunk('\n\n好的，已取消联网搜索。如需其他帮助，请继续提问。');
+        finalizeBotMessage();
+        isSending = false;
+        resetSendButton();
+        document.getElementById('chatInput').focus();
+    }
+
+    // 启动联网搜索回退
+    function startWebSearchFallback(question) {
+        isSending = true;
+        currentThinkingText = '';
+        // 保留 currentBotWrapper 以继续在同一个气泡中输出
+        streamCompleted = false;
+        receivedChunks = 0;
+        updateSendButtonState();
+
+        const typingEl = appendTyping();
+
+        const url = '/agent/chat/stream?query=' + encodeURIComponent(question)
+                  + '&conversationId=' + encodeURIComponent(currentConvId)
+                  + '&saveUserMessage=false';
+        const es = new EventSource(url);
+        currentEventSource = es;
+
+        es.onmessage = function(event) {
+            receivedChunks++;
+            if (typingEl && typingEl.parentNode) {
+                removeTyping(typingEl);
+            }
+            try {
+                const data = JSON.parse(event.data);
+                switch (data.type) {
+                    case 'text':
+                        handleTextChunk(data.content);
+                        break;
+                    case 'thinking':
+                        handleThinkingChunk(data.content);
+                        break;
+                    case 'reference':
+                        handleReferences(data.content, data.count);
+                        break;
+                    case 'recommend':
+                        handleRecommendations(data.content);
+                        break;
+                    case 'complete':
+                        streamCompleted = true;
+                        closeStream();
+                        break;
+                    case 'error':
+                        handleStreamError(data.content || '服务异常');
+                        break;
+                }
+            } catch (e) {
+                console.error('SSE parse error:', e, event.data);
+            }
+            scrollChatToBottom();
+        };
+
+        es.addEventListener('complete', function() {
+            closeStream();
+        });
+
+        es.onerror = function() {
+            if (es.readyState === EventSource.CLOSED || streamCompleted || receivedChunks > 0) {
+                closeStream();
+            } else {
+                if (typingEl && typingEl.parentNode) removeTyping(typingEl);
+                handleStreamError('联网搜索连接异常，请重试');
+                closeStream();
+            }
+        };
     }
 
     function stopGeneration() {

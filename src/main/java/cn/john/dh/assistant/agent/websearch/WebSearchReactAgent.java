@@ -76,6 +76,11 @@ public class WebSearchReactAgent extends BaseAgent {
     private int maxRounds;
 
     /**
+     * 是否保存用户消息到数据库（RAG回退联网搜索场景下设为false，避免重复保存）
+     */
+    private final boolean saveUserMessage;
+
+    /**
      * Advisor列表，如聊天记忆Advisor等
      */
     private final List<Advisor> advisors;
@@ -93,6 +98,7 @@ public class WebSearchReactAgent extends BaseAgent {
         this.tools = builder.tools; // 设置可用工具数组
         this.systemPrompt = builder.systemPrompt; // 设置自定义系统提示词
         this.maxRounds = builder.maxRounds; // 设置最大推理轮次
+        this.saveUserMessage = builder.saveUserMessage; // 设置是否保存用户消息
         this.advisors = builder.advisors; // 设置Advisor列表
         this.chatMemory = builder.chatMemory; // 设置聊天记忆（字段继承自BaseAgent）
         this.chatConversationService = builder.conversationService; // 设置会话服务（字段继承自BaseAgent）
@@ -229,8 +235,10 @@ public class WebSearchReactAgent extends BaseAgent {
         }
         //加载历史记忆
         loadChatHistory(messages, conversationId, 10);
-        //保存问题
-        chatMessageService.saveMessage(conversationId, ChatMessageType.USER, question);
+        //保存问题（RAG回退联网搜索场景下跳过，避免重复保存）
+        if (saveUserMessage) {
+            chatMessageService.saveMessage(conversationId, ChatMessageType.USER, question);
+        }
         //拼接当前会话问题
         messages.add(new UserMessage("<question>" + question + "</question>"));
         return messages;
@@ -873,6 +881,7 @@ public class WebSearchReactAgent extends BaseAgent {
         private String systemPrompt = ""; // 自定义系统提示词，默认为空字符串
         private int maxReflectionRounds; // 最大反思轮次
         private int maxRounds = 5; // 最大推理轮次（默认5，防止未配置时无轮次上限导致工具无限调用）
+        private boolean saveUserMessage = true; // 是否保存用户消息（RAG回退场景下设为false）
         private List<Advisor> advisors; // Advisor列表
         private ChatMemory chatMemory; // 聊天记忆
         private ChatConversationService conversationService; // 会话服务
@@ -999,6 +1008,15 @@ public class WebSearchReactAgent extends BaseAgent {
         public Builder maxRounds(int maxRounds) { // 设置最大推理轮次
             this.maxRounds = maxRounds; // 赋值推理轮次
             return this; // 返回Builder支持链式调用
+        }
+
+        /**
+         * 设置是否保存用户消息到数据库。
+         * RAG 回退联网搜索场景下设为 false，避免重复保存。
+         */
+        public Builder saveUserMessage(boolean saveUserMessage) {
+            this.saveUserMessage = saveUserMessage;
+            return this;
         }
 
         /**

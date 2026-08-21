@@ -140,9 +140,10 @@ public class AgentChatController implements InitializingBean {
     @GetMapping(value = "/chat/stream", produces = "text/event-stream;charset=UTF-8")
     public Flux<String> chatStream(
             @RequestParam String query,
-            @RequestParam String conversationId) {
+            @RequestParam String conversationId,
+            @RequestParam(defaultValue = "true") boolean saveUserMessage) {
         // 记录请求日志
-        log.info("收到网页搜索请求: query={}, conversationId={}", query, conversationId);
+        log.info("收到网页搜索请求: query={}, conversationId={}, saveUserMessage={}", query, conversationId, saveUserMessage);
 
         // 校验查询参数非空
         if (query == null || query.trim().isEmpty()) {
@@ -158,7 +159,7 @@ public class AgentChatController implements InitializingBean {
 
         try {
             // 初始化网页搜索Agent
-            WebSearchReactAgent agent = initWebSearchAgent();
+            WebSearchReactAgent agent = initWebSearchAgent(saveUserMessage);
             // 执行Agent并返回SSE流
             return agent.execute(conversationId, query);
         } catch (Exception e) {
@@ -222,9 +223,10 @@ public class AgentChatController implements InitializingBean {
     @GetMapping(value = "/rag/stream", produces = "text/event-stream;charset=UTF-8")
     public Flux<String> ragStream(
             @RequestParam String query,
-            @RequestParam String conversationId) {
+            @RequestParam String conversationId,
+            @RequestParam(defaultValue = "false") boolean enableWebSearchFallback) {
         // 记录请求日志
-        log.info("收到知识库问答请求: query={}, conversationId={}", query, conversationId);
+        log.info("收到知识库问答请求: query={}, conversationId={}, enableWebSearchFallback={}", query, conversationId, enableWebSearchFallback);
 
         // 校验查询参数非空
         if (query == null || query.trim().isEmpty()) {
@@ -240,7 +242,7 @@ public class AgentChatController implements InitializingBean {
 
         try {
             // 初始化知识库问答Agent
-            RagAgent agent = initRagAgent();
+            RagAgent agent = initRagAgent(enableWebSearchFallback);
             // 执行Agent并返回SSE流
             return agent.execute(conversationId, query);
         } catch (Exception e) {
@@ -258,9 +260,9 @@ public class AgentChatController implements InitializingBean {
      *
      * @return 配置完成的RagAgent实例
      */
-    private RagAgent initRagAgent() {
+    private RagAgent initRagAgent(boolean enableWebSearchFallback) {
         // 记录初始化日志
-        log.info("初始化知识库问答 Agent...");
+        log.info("初始化知识库问答 Agent, enableWebSearchFallback={}...", enableWebSearchFallback);
 
         // 构建知识库问答Agent
         RagAgent ragAgent = RagAgent.builder()
@@ -284,6 +286,10 @@ public class AgentChatController implements InitializingBean {
                 .tableMetaMapper(tableMetaMapper)
                 // 设置文件存储服务（用于预签名 URL 转换）
                 .fileStorageService(fileStorageService)
+                // 设置联网搜索工具（用于 RAG 无结果时提示用户联网搜索）
+                .webSearchTools(ensureWebSearchToolCallbacks())
+                // 设置联网搜索提示开关（前端选了联网时为 true）
+                .enableWebSearchFallback(enableWebSearchFallback)
                 .build();
         // 设置标题生成专用模型（本地Ollama）
         ragAgent.setTitleModel(ollamaChatModel);
@@ -382,7 +388,7 @@ public class AgentChatController implements InitializingBean {
      *
      * @return 配置完成的WebSearchReactAgent实例
      */
-    private WebSearchReactAgent initWebSearchAgent() {
+    private WebSearchReactAgent initWebSearchAgent(boolean saveUserMessage) {
         // 记录初始化日志
         log.info("初始化网页搜索 Agent...");
 
@@ -400,6 +406,8 @@ public class AgentChatController implements InitializingBean {
                 .chatTokenLimitService(chatTokenLimitService)
                 // 设置MCP搜索工具（懒加载：启动时初始化失败则在此重试）
                 .tools(ensureWebSearchToolCallbacks())
+                // 设置是否保存用户消息（RAG回退场景下不重复保存）
+                .saveUserMessage(saveUserMessage)
                 .build();
         // 设置标题生成专用模型（本地Ollama）
         webSearchAgent.setTitleModel(ollamaChatModel);

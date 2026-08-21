@@ -21,6 +21,8 @@ public class AgentResponse {
     public static final String TYPE_RECOMMEND = "recommend";
     /** 流式响应结束类型常量 */
     public static final String TYPE_COMPLETE = "complete";
+    /** 联网搜索确认提示类型常量（Human in the Loop） */
+    public static final String TYPE_WEB_SEARCH_PROMPT = "web_search_prompt";
 
     // 响应类型（text/thinking/reference/error/recommend）
     private String type;

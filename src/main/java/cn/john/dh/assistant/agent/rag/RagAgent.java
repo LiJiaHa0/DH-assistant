@@ -45,6 +45,7 @@ import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.messages.*;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.document.Document;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.util.StringUtils;
@@ -84,6 +85,12 @@ public class RagAgent extends BaseAgent {
     // 文件存储服务，用于将私有 MinIO URL 转换为预签名公开 URL（参考来源展示）
     private final FileStorageService fileStorageService;
 
+    // 联网搜索工具回调数组，用于 RAG 检索无结果时提示用户联网搜索
+    private final ToolCallback[] webSearchTools;
+
+    // 是否启用联网搜索提示（true：前端选了联网，RAG无结果时提示用户确认是否联网；false：不提示）
+    private final boolean enableWebSearchFallback;
+
     // Text2SQL 最大重试次数（生成+校验+执行循环）
     private static final int MAX_SQL_RETRY = 3;
 
@@ -121,6 +128,10 @@ public class RagAgent extends BaseAgent {
         this.tableMetaMapper = builder.tableMetaMapper;
         // 设置文件存储服务（用于预签名 URL）
         this.fileStorageService = builder.fileStorageService;
+        // 设置联网搜索工具回调
+        this.webSearchTools = builder.webSearchTools;
+        // 设置联网搜索提示开关
+        this.enableWebSearchFallback = builder.enableWebSearchFallback;
         // 设置检索参数
         this.vectorTopK = builder.vectorTopK;
         this.bm25TopK = builder.bm25TopK;
@@ -213,16 +224,9 @@ public class RagAgent extends BaseAgent {
                 if (ctx.hasSentFinalResult.get()) {
                     return;
                 }
-                // 检索不到相关内容：直接返回固定提示，不再让 LLM 基于通用知识硬答（避免幻觉/编造）
+                // 检索不到相关内容：根据联网搜索回退策略决定下一步操作
                 if (!StringUtils.hasText(context)) {
-                    emit(sink, ctx.hasSentFinalResult,
-                            "很抱歉，知识库中未检索到与您的问题相关的内容，无法基于知识库回答。\n\n"
-                                    + "建议您：\n"
-                                    + "1. 更换关键词或换一种提问方式\n"
-                                    + "2. 确认相关文档已上传到知识库\n"
-                                    + "3. 如需实时资讯、体育赛事等时效性信息，请切换到「联网」或「深度思考」模式",
-                            AgentResponse.TYPE_TEXT);
-                    complete(sink, ctx.hasSentFinalResult);
+                    handleEmptyRagContext(question, messages, sink, ctx, convId);
                     return;
                 }
                 // 流式生成回答
@@ -1806,6 +1810,53 @@ public class RagAgent extends BaseAgent {
         sink.tryEmitComplete();
     }
 
+    // ==================== 联网搜索回退 ====================
+
+    /**
+     * 处理 RAG 检索无结果的情况
+     * 根据联网搜索回退策略决定：自动联网搜索 / 提示用户确认 / 直接返回未找到提示
+     *
+     * @param question 用户原始问题
+     * @param messages 消息列表
+     * @param sink     响应流信号发射器
+     * @param ctx      流式会话上下文
+     * @param convId   会话ID
+     */
+    private void handleEmptyRagContext(String question, List<Message> messages,
+                                       Sinks.Many<String> sink, ChatStreamContext ctx, String convId) {
+        if (enableWebSearchFallback && hasWebSearchTools()) {
+            // 前端选了联网搜索：提示用户确认是否联网搜索（Human in the Loop）
+            emit(sink, ctx.hasSentFinalResult,
+                    "❓ 知识库中未检索到相关内容，是否允许使用联网搜索？\n", AgentResponse.TYPE_THINKING);
+            // 发送联网搜索确认提示
+            JSONObject promptData = new JSONObject();
+            promptData.put("type", AgentResponse.TYPE_WEB_SEARCH_PROMPT);
+            promptData.put("content", "知识库中未检索到相关内容，是否允许使用联网搜索来查找答案？");
+            promptData.put("data", question);
+            sink.tryEmitNext(promptData.toJSONString());
+            complete(sink, ctx.hasSentFinalResult);
+        } else {
+            // 前端未选联网搜索，或无联网搜索工具：直接返回未找到提示
+            emit(sink, ctx.hasSentFinalResult,
+                    "很抱歉，知识库中未检索到与您的问题相关的内容，无法基于知识库回答。\n\n"
+                            + "建议您：\n"
+                            + "1. 更换关键词或换一种提问方式\n"
+                            + "2. 确认相关文档已上传到知识库\n"
+                            + "3. 如需实时资讯、体育赛事等时效性信息，请切换到「联网」或「深度思考」模式",
+                    AgentResponse.TYPE_TEXT);
+            complete(sink, ctx.hasSentFinalResult);
+        }
+    }
+
+    /**
+     * 判断是否有可用的联网搜索工具
+     *
+     * @return true表示有可用的搜索工具
+     */
+    private boolean hasWebSearchTools() {
+        return webSearchTools != null && webSearchTools.length > 0;
+    }
+
     /**
      * 完成流式响应，标记结束并发送结束标记
      * 使用CAS确保只发送一次
@@ -1945,6 +1996,10 @@ public class RagAgent extends BaseAgent {
         private int bm25TopK = 10;
         // RRF融合后返回的最大结果数，默认5
         private int fusedTopK = 5;
+        // 联网搜索工具回调数组
+        private ToolCallback[] webSearchTools;
+        // 是否启用联网搜索提示
+        private boolean enableWebSearchFallback = false;
 
         /**
          * 设置聊天模型
@@ -2055,6 +2110,22 @@ public class RagAgent extends BaseAgent {
          */
         public Builder fusedTopK(int fusedTopK) {
             this.fusedTopK = fusedTopK;
+            return this;
+        }
+
+        /**
+         * 设置联网搜索工具回调数组
+         */
+        public Builder webSearchTools(ToolCallback[] webSearchTools) {
+            this.webSearchTools = webSearchTools;
+            return this;
+        }
+
+        /**
+         * 设置是否启用联网搜索提示（前端选了联网时为 true）
+         */
+        public Builder enableWebSearchFallback(boolean enableWebSearchFallback) {
+            this.enableWebSearchFallback = enableWebSearchFallback;
             return this;
         }
 
